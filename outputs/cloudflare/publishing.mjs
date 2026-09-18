@@ -46,6 +46,7 @@ export async function publishing(request, env) {
         "Content-Type": "application/json",
         "Cache-Control": "no-store",
         ETag: etag,
+        "X-Project-Revision": etag,
       },
     });
   }
@@ -142,7 +143,7 @@ export async function publishing(request, env) {
       )
         return json({ error: "有素材尚未上传完成" }, 400);
     }
-    const match = request.headers.get("If-Match");
+    const match = request.headers.get("If-Match")?.replace(/^W\//, "");
     if (!match) return json({ error: "缺少版本条件，请重新保存" }, 428);
     const previous = await store.get("published/project.json");
     if (match === "none") {

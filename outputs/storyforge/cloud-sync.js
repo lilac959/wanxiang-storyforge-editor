@@ -53,7 +53,10 @@ async function publishProject(snapshot) {
       signal: AbortSignal.timeout(30000),
     });
     if (!current.ok && current.status !== 404) await cloudResponse(current);
-    const revision = current.ok ? current.headers.get("ETag") : "none";
+    const revision = current.ok
+      ? current.headers.get("X-Project-Revision") ||
+        current.headers.get("ETag")?.replace(/^W\//, "")
+      : "none";
     const ids = [...new Set(projectAssets(snapshot).filter(Boolean))];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
