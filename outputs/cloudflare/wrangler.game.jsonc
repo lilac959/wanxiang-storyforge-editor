@@ -14,10 +14,10 @@
       "/assets/chapter01-branch-7.mp4"
     ]
   },
-  "r2_buckets": [
+  "kv_namespaces": [
     {
       "binding": "PROJECT_STORE",
-      "bucket_name": "wanxiang-storyforge-project"
+      "id": "193077a2c5154127b9e5a02d52d1ec85"
     }
   ],
   "vars": {

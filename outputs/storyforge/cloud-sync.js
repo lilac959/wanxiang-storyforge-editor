@@ -75,8 +75,8 @@ async function publishProject(snapshot) {
               gif: "image/gif",
             }[extension];
         if (!type) throw Error("无法识别素材格式：" + id);
-        if (blob.size > 95 * 1024 * 1024)
-          throw Error("单个素材超过 95 MB，请压缩后再同步");
+        if (blob.size > 1024 * 1024 * 1024)
+          throw Error("单个素材超过 1 GB，请压缩后再同步");
         const hash = Array.from(
           new Uint8Array(
             await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()),
@@ -93,15 +93,44 @@ async function publishProject(snapshot) {
       });
       if (!exists.ok) {
         if (exists.status !== 404) await cloudResponse(exists);
+        const chunkSize = 20 * 1024 * 1024,
+          total = Math.ceil(item.blob.size / chunkSize),
+          partSizes = [];
+        for (let part = 0; part < total; part++) {
+          const chunk = item.blob.slice(
+            part * chunkSize,
+            Math.min(item.blob.size, (part + 1) * chunkSize),
+            item.type,
+          );
+          partSizes.push(chunk.size);
+          button.textContent = `同步素材 ${i + 1}/${ids.length} · ${part + 1}/${total}`;
+          await cloudResponse(
+            await fetch(`${url}/part/${part}`, {
+              method: "PUT",
+              headers: {
+                Authorization: "Bearer " + token,
+                "Content-Type": "application/octet-stream",
+                "X-Total-Parts": String(total),
+              },
+              body: chunk,
+              signal: AbortSignal.timeout(180000),
+            }),
+          );
+        }
         await cloudResponse(
           await fetch(url, {
-            method: "PUT",
+            method: "POST",
             headers: {
               Authorization: "Bearer " + token,
-              "Content-Type": item.type,
+              "Content-Type": "application/json",
             },
-            body: item.blob,
-            signal: AbortSignal.timeout(180000),
+            body: JSON.stringify({
+              type: item.type,
+              size: item.blob.size,
+              parts: total,
+              partSizes,
+            }),
+            signal: AbortSignal.timeout(30000),
           }),
         );
       }
