@@ -2,7 +2,10 @@
 const cloudPlayer = document.documentElement.dataset.mode === "game";
 let cloudSaving = false,
   gameVersion = "",
-  gameStarting = false;
+  gameStarting = false,
+  cloudPendingSnapshot = null,
+  cloudAutosyncTimer = null,
+  cloudAutosyncReady = false;
 const cloudAssetCache = new Map();
 function cloudToken() {
   return (
@@ -31,10 +34,31 @@ async function retryCloudWrite(makeRequest, shouldRetry, attempts = 8) {
   }
   throw error;
 }
-async function publishProject(snapshot) {
-  if (cloudSaving) return;
+function scheduleCloudPublish(snapshot, delay = 1200) {
+  if (cloudPlayer || !cloudAutosyncReady || !cloudToken()) return;
+  cloudPendingSnapshot = structuredClone(snapshot);
+  clearTimeout(cloudAutosyncTimer);
+  document.querySelector("#saved").textContent = "● 已保存本机 · 等待云端同步";
+  cloudAutosyncTimer = setTimeout(() => {
+    const next = cloudPendingSnapshot;
+    cloudPendingSnapshot = null;
+    publishProject(next, false);
+  }, delay);
+}
+function enableCloudAutosync(snapshot) {
+  cloudAutosyncReady = true;
+  scheduleCloudPublish(snapshot, 300);
+}
+async function publishProject(snapshot, interactive = true) {
+  clearTimeout(cloudAutosyncTimer);
+  cloudAutosyncTimer = null;
+  if (cloudSaving) {
+    cloudPendingSnapshot = structuredClone(snapshot);
+    return;
+  }
   let token = cloudToken();
   if (!token) {
+    if (!interactive) return;
     token = prompt("首次同步：请输入本站发布密钥（只需连接一次）");
     if (!token?.trim()) {
       document.querySelector("#saved").textContent =
@@ -173,6 +197,7 @@ async function publishProject(snapshot) {
     if (error.status === 401) {
       localStorage.removeItem("storyforge-publish-token");
       sessionStorage.removeItem("storyforge-publish-token");
+      cloudPendingSnapshot = null;
     }
     document.querySelector("#saved").textContent =
       "● 已保存本机 · 云端同步失败";
@@ -182,6 +207,11 @@ async function publishProject(snapshot) {
     cloudSaving = false;
     button.disabled = false;
     button.textContent = "保存配置";
+    if (cloudPendingSnapshot && cloudToken()) {
+      const next = cloudPendingSnapshot;
+      cloudPendingSnapshot = null;
+      setTimeout(() => publishProject(next, false));
+    }
   }
 }
 function usePublishedProject(envelope) {
@@ -249,4 +279,9 @@ if (!cloudPlayer) {
     localStorage.setItem("storyforge-publish-token", setup);
     history.replaceState(null, "", location.pathname + location.search);
   }
+  addEventListener("beforeunload", (event) => {
+    if (!cloudSaving && !cloudPendingSnapshot && !cloudAutosyncTimer) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 }

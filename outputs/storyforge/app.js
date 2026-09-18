@@ -9,7 +9,7 @@ async function getBlob(id){const db=await dbReady;if(!db)return null;return new 
 function asset(id){return media.get(id)||(/^asset-tail-video-[1-9]$/.test(id)?'assets/chapter01-branch-'+id.split('-').pop()+'.mp4':'')||(/^asset-chapter01-0[1-4]$/.test(id)?'assets/'+id.slice(6)+'.png':'')||(id==='asset-loading-video-v1'?'assets/loading-background.mp4':'')||(id==='asset-opening-v1'?'assets/opening.mp4':'')||(id==='asset-loading-cover-v1'?'assets/loading-cover.png':'')||(/^https?:\/\//i.test(id)?id:'')}
 function current(){return project.nodes.find(n=>n.id===selected)||project.nodes[0]}
 function notify(text){$('#toast').textContent=text;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),2500)}
-function save(){try{localStorage.setItem('storyforge-project',JSON.stringify(project));$('#saved').textContent='● 已保存到本机';return true}catch{$('#saved').textContent='保存失败，请导出项目';notify('本机存储不足，请导出项目');return false}}
+function save(){try{localStorage.setItem('storyforge-project',JSON.stringify(project));$('#saved').textContent='● 已保存到本机';if(typeof scheduleCloudPublish==='function')scheduleCloudPublish(project);return true}catch{$('#saved').textContent='保存失败，请导出项目';notify('本机存储不足，请导出项目');return false}}
 function repairTiming(p){
  if(!Array.isArray(p?.nodes))return;
  for(const n of p.nodes){
@@ -361,4 +361,6 @@ document.addEventListener('compositionstart',e=>{if(e.target.matches('input,text
 document.addEventListener('compositionend',e=>{if(e.target.matches('input,textarea')){delete e.target.dataset.composing;e.target.dispatchEvent(new Event('input',{bubbles:true}))}});
 
 function installBranchGrayscale(p){if(p.branchGrayscaleRevision===1)return false;for(const n of p.nodes)if(/^asset-tail-video-[1-9]$/.test(n.video||'')||/^n-tail-video-[1-9]x*$/.test(n.id)||/^[1-9]\.mp4$/i.test(n.videoName||''))n.grayscale=true;p.branchGrayscaleRevision=1;return true}
+
+if(typeof cloudPlayer==='undefined'||!cloudPlayer){const armCloudAutosync=setInterval(()=>{if(!document.querySelector('.nodeitem'))return;clearInterval(armCloudAutosync);if(typeof enableCloudAutosync==='function')enableCloudAutosync(project)},100)}
 
