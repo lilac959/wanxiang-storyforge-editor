@@ -1,0 +1,13 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');
+const timers=[],calls=[],nodes={};let hasVideo=false;
+const video={play:()=>Promise.resolve(),pause(){}};
+const element=()=>({dataset:{},addEventListener(type,cb){this[type]=cb}});
+const doc={querySelector(selector){if(selector==='#playerScreen video')return hasVideo?video:null;return nodes[selector]??=element()},querySelectorAll:()=>[],addEventListener(){}};
+const ctx=vm.createContext({document:doc,window:{addEventListener(){}},indexedDB:{open:()=>({})},structuredClone,console,setTimeout(fn,ms){timers.push({fn,ms});return timers.length},clearTimeout(){},clearInterval(){}});
+vm.runInContext(fs.readFileSync('outputs/storyforge/app.js','utf8').replace('render()}init();','render()}'),ctx);
+ctx.record=id=>calls.push(id);vm.runInContext("activeRun=true;runToken=4;selected='n3';playNode=id=>record(id);playSplash(4)",ctx);
+assert.equal(nodes['#player'].dataset.phase,'splash');assert.equal(timers[0].ms,3000);timers.shift().fn();assert.deepEqual(calls,['n1']);
+hasVideo=true;calls.length=0;vm.runInContext('playSplash(4)',ctx);assert.equal(timers.length,0);assert.equal(calls.length,0);video.onended();assert.deepEqual(calls,['n1']);video.onended();assert.equal(calls.length,1);
+calls.length=0;vm.runInContext('playSplash(4)',ctx);nodes['#skipIntro'].click();assert.deepEqual(calls,['n1']);
+calls.length=0;vm.runInContext('playSplash(4);runToken=5',ctx);video.onended();assert.equal(calls.length,0);
+console.log('PASS: text splash duration, video waits for ended, skip runs once, first node independent of selection, cancelled run cannot advance');

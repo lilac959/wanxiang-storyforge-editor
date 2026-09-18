@@ -1,0 +1,12 @@
+const fs=require('fs'),vm=require('vm'),assert=require('node:assert/strict');let keyListener;const calls=[];
+const prompt={hidden:true,focus(){}},video={play:()=>Promise.resolve(),pause(){}},screen={querySelector:()=>prompt,addEventListener(t,cb){this[t]=cb},removeEventListener(t){delete this[t]}};
+const nodes={'#player':{dataset:{},addEventListener(){}},'#playerStatus':{},'#playerScreen':{},'#playerScreen video':video,'#playerScreen .splash-stage':screen};const generic={addEventListener(){},remove(){}};
+const ctx=vm.createContext({document:{querySelector:s=>nodes[s]||generic,addEventListener(t,fn){if(t==='keydown')keyListener=fn},removeEventListener(t){if(t==='keydown')keyListener=null}},window:{addEventListener(){}},indexedDB:{open:()=>({})},structuredClone,setTimeout,clearTimeout,clearInterval,console});
+vm.runInContext(fs.readFileSync('outputs/storyforge/app.js','utf8').replace('render()}init();','render()}'),ctx);ctx.record=id=>calls.push(id);
+vm.runInContext("activeRun=true;runToken=1;playNode=id=>record(id);playSplash(1)",ctx);
+const press=(key,extra={})=>keyListener?.({key,target:{closest:()=>null},preventDefault(){},...extra});
+press('a');assert.equal(calls.length,0);video.onended();assert.equal(prompt.hidden,false);assert.equal(calls.length,0);
+press('Escape');press('Tab');press('a',{repeat:true});assert.equal(calls.length,0);press('a');assert.deepEqual(calls,['n1']);assert.equal(keyListener,null);
+calls.length=0;vm.runInContext('playSplash(1)',ctx);video.onended();screen.click({target:{closest:()=>null}});assert.deepEqual(calls,['n1']);
+calls.length=0;vm.runInContext('playSplash(1);clearSplashInput();runToken=2',ctx);video.onended();assert.equal(calls.length,0);assert.equal(keyListener,null);
+console.log('PASS: no start before video ends, held final frame, any ordinary key and click start once, Escape/Tab/repeat excluded, listeners cleaned on exit');

@@ -1,0 +1,8 @@
+{
+  "name": "wanxiang-storyforge-editor",
+  "account_id": "d1f1acc43863f572e706c82a5d1f1d58",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-14",
+  "workers_dev": true,
+  "assets": {"directory": "./public", "binding": "ASSETS", "run_worker_first": ["/assets/chapter01-branch-7.mp4"]}
+}

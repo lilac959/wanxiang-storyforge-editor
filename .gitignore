@@ -1,0 +1,29 @@
+# Generated outputs and historical design artifacts stay local.
+/outputs/*
+!/outputs/storyforge/
+!/outputs/cloudflare/
+/outputs/cloudflare/public/
+/outputs/cloudflare/.wrangler/
+/outputs/cloudflare/media-manifest.json
+
+# Keep maintained helpers and tests, not one-off migration/design scripts.
+/work/*
+!/work/server.cjs
+!/work/package-mechanical.py
+!/work/test-*.cjs
+!/work/test-*.mjs
+!/work/run-refactor-checks.cjs
+!/work/REFACTOR.md
+!/work/refactor-backup/
+/work/refactor-backup/*
+!/work/refactor-backup/timeline-editor.js
+
+node_modules/
+.wrangler/
+__pycache__/
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
