@@ -1,7 +1,13 @@
+import { publishing } from './publishing.mjs';
 import media from './media-manifest.json' with {type:'json'};
 export default {
  async fetch(request,env){
-  const url=new URL(request.url),entry=media[url.pathname];
+  const api=await publishing(request,env);if(api)return api;
+  const url=new URL(request.url);
+  if(env.GAME_ONLY==='true'&&['/','/index.html'].includes(url.pathname)){
+   url.pathname='/game.html';return env.ASSETS.fetch(new Request(url,request));
+  }
+  const entry=media[url.pathname];
   if(!entry)return env.ASSETS.fetch(request);
   if(!['GET','HEAD'].includes(request.method))return new Response(null,{status:405,headers:{Allow:'GET, HEAD'}});
   let start=0,end=entry.size-1,status=200;

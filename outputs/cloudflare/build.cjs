@@ -25,3 +25,10 @@ function copy(dir,relative=''){
 }
 copy(source);fs.writeFileSync(path.join(dest,'media-downloads.json'),JSON.stringify(downloads));fs.writeFileSync(path.join(__dirname,'media-manifest.json'),JSON.stringify(manifest,null,2));
 console.log('Built editor; chunked '+Object.keys(manifest).length+' large media file(s), original bytes preserved.');
+
+const game=fs.readFileSync(path.join(source,'index.html'),'utf8')
+ .replace('<html lang=', '<html data-mode="game" lang=')
+ .replace('</head>','<link rel="stylesheet" href="game.css"></head>')
+ .replace('<body>','<body><section id="gameHome"><h1 id="gameTitle">万象环轨</h1><p id="gameMessage">正在获取最新作品…</p><button id="gameStart" disabled>开始游戏</button></section>')
+ .replace('<dialog id="player">','<dialog id="player"><button id="gameUpdate" hidden>作品已更新 · 点击重新开始</button>');
+fs.writeFileSync(path.join(dest,'game.html'),game);

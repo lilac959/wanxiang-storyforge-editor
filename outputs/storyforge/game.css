@@ -1,0 +1,58 @@
+html[data-mode="game"] body {
+  margin: 0;
+  background: #090e10;
+  color: #e5d6b1;
+}
+html[data-mode="game"] body > header,
+html[data-mode="game"] .app {
+  display: none;
+}
+#gameHome {
+  min-height: 100dvh;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 22px;
+  text-align: center;
+  padding: 32px;
+  background: radial-gradient(ellipse at center, #263039 0, #090e10 75%);
+}
+#gameTitle {
+  font-size: clamp(32px, 6vw, 76px);
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  margin: 0;
+}
+#gameMessage {
+  color: #acb0a8;
+  max-width: 36em;
+}
+#gameStart {
+  padding: 14px 44px;
+  font-size: 18px;
+  border: 1px solid #bd9b50;
+  background: #30291e;
+  color: #ead6a0;
+}
+#gameUpdate {
+  position: fixed;
+  z-index: 1000;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #30291e;
+  color: #ead6a0;
+  border-color: #bd9b50;
+}
+#gameUpdate[hidden] {
+  display: none;
+}
+html[data-mode="game"] #player {
+  max-width: none;
+  max-height: none;
+  width: 100vw;
+  height: 100dvh;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
