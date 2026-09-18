@@ -18,6 +18,19 @@ async function cloudResponse(response) {
     status: response.status,
   });
 }
+async function retryCloudWrite(makeRequest, shouldRetry, attempts = 8) {
+  let error;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await cloudResponse(await makeRequest());
+    } catch (next) {
+      error = next;
+      if (!shouldRetry(next) || attempt === attempts - 1) throw next;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+  throw error;
+}
 async function publishProject(snapshot) {
   if (cloudSaving) return;
   let token = cloudToken();
@@ -117,8 +130,8 @@ async function publishProject(snapshot) {
             }),
           );
         }
-        await cloudResponse(
-          await fetch(url, {
+        await retryCloudWrite(
+          () => fetch(url, {
             method: "POST",
             headers: {
               Authorization: "Bearer " + token,
@@ -132,13 +145,14 @@ async function publishProject(snapshot) {
             }),
             signal: AbortSignal.timeout(30000),
           }),
+          (error) => error.status === 400 && /素材第.+块尚未上传/.test(error.message),
         );
       }
       remapProjectSource(snapshot, id, "asset-cloud-" + item.hash);
     }
     button.textContent = "发布配置…";
-    await cloudResponse(
-      await fetch("/api/publish", {
+    await retryCloudWrite(
+      () => fetch("/api/publish", {
         method: "POST",
         headers: {
           Authorization: "Bearer " + token,
@@ -148,6 +162,7 @@ async function publishProject(snapshot) {
         body: JSON.stringify(snapshot),
         signal: AbortSignal.timeout(30000),
       }),
+      (error) => error.status === 400 && error.message === "有素材尚未上传完成",
     );
     document.querySelector("#saved").textContent = "● 本次保存已同步游戏站";
     notify("保存成功，独立游戏站已更新");
@@ -158,6 +173,7 @@ async function publishProject(snapshot) {
     }
     document.querySelector("#saved").textContent =
       "● 已保存本机 · 云端同步失败";
+    document.querySelector("#saved").title = error.message;
     notify(error.message + "；本机配置已保留，可再次保存重试");
   } finally {
     cloudSaving = false;

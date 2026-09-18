@@ -1,1 +1,38 @@
-const {chromium}=require('C:/Users/Admin/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright');const assert=require('assert/strict');(async()=>{const b=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});const p=await b.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto('http://127.0.0.1:4173/');await p.waitForSelector('.nodeitem');await p.evaluate(()=>{selected=project.nodes[0].id;page='story';render()});await p.locator('[data-add-cinema]').click();assert(await p.evaluate(()=>current().cinemaMode&&current().cinemaEnd===nodeDuration(current())));assert(await p.locator('.timeline-scroll').evaluate(e=>e.scrollWidth>e.clientWidth));await p.locator('.timeline-scroll').evaluate(e=>e.scrollLeft=120);assert(await p.locator('.timeline-scroll').evaluate(e=>e.scrollLeft>0));assert(await p.evaluate(()=>{const n=current();applyTimelineTime(n,'cinemaStart',2);applyTimelineTime(n,'cinemaEnd',8);const old=JSON.stringify(cinemaRange(n,nodeDuration(n)));applyTimelineTime(n,'start',5);return old===JSON.stringify(cinemaRange(n,nodeDuration(n)))}));await p.evaluate(()=>{renderArea();renderProperties();const n=current(),stage=document.querySelector('#editorArea .stage');syncCinema(stage,n,4,nodeDuration(n))});assert(await p.locator('.cinema-bars').evaluate(e=>parseFloat(e.style.getPropertyValue('--cinema-height'))>0));await p.evaluate(()=>syncCinema(document.querySelector('#editorArea .stage'),current(),9,nodeDuration(current())));assert.equal(await p.locator('.cinema-bars').evaluate(e=>parseFloat(e.style.getPropertyValue('--cinema-height'))),0);assert.deepEqual(errors,[]);console.log('PASS scrolling, non-QTE cinema creation, independent start/end, no QTE coupling, playback bounds');await b.close()})().catch(e=>{console.error(e);process.exit(1)});
+const { chromium } = require("C:/Users/Admin/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright");
+const assert = require("assert/strict");
+(async () => {
+  const browser = await chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+  const page = await browser.newPage();
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("http://127.0.0.1:4173/");
+  await page.waitForSelector(".nodeitem");
+  await page.evaluate(() => { selected = project.nodes[0].id; page = "story"; render(); });
+  await page.locator("[data-add-cinema]").click();
+  assert(await page.evaluate(() => current().cinemaMode && current().cinemaEnd === nodeDuration(current())));
+  assert(await page.locator(".timeline-scroll").evaluate((element) => element.scrollWidth > element.clientWidth));
+  await page.locator(".timeline-scroll").evaluate((element) => (element.scrollLeft = 120));
+  assert(await page.locator(".timeline-scroll").evaluate((element) => element.scrollLeft > 0));
+  assert(await page.evaluate(() => {
+    const node = current();
+    applyTimelineTime(node, "cinemaStart", 2);
+    applyTimelineTime(node, "cinemaEnd", 8);
+    const old = JSON.stringify(cinemaRange(node, nodeDuration(node)));
+    applyTimelineTime(node, "start", 5);
+    return old === JSON.stringify(cinemaRange(node, nodeDuration(node)));
+  }));
+  await page.evaluate(() => {
+    renderArea();
+    renderProperties();
+    const node = current();
+    syncCinema(document.querySelector("#editorArea .stage"), node, 4, nodeDuration(node));
+  });
+  assert(await page.locator(".cinema-bars").evaluate((element) => parseFloat(element.style.getPropertyValue("--cinema-height")) > 0));
+  await page.locator("[data-cinema-clip]").click({ button: "right" });
+  await page.locator("[data-delete-cinema]").click();
+  assert.equal(await page.evaluate(() => current().cinemaMode), false);
+  assert.equal(await page.locator("[data-cinema-clip]").count(), 0);
+  assert.deepEqual(errors, []);
+  console.log("PASS scrolling, cinema timing, independent QTE timing, playback bounds, right-click deletion");
+  await browser.close();
+})().catch((error) => { console.error(error); process.exit(1); });

@@ -197,7 +197,7 @@ function timelineMarkup(n) {
     );
   if (n.cinemaMode) {
     const { start: cs, end: ce } = cinemaRange(n, d);
-    rows += `<div class="edit-track timing-track"><span>电影黑边</span><div class="edit-lane"><div class="timeline-item timing-item cinema-item" style="left:${(cs / d) * 100}%;width:${((ce - cs) / d) * 100}%">${timeHandle("cinemaStart", cs, d, "left")}<span>${cs.toFixed(1)}–${ce.toFixed(1)}s 黑边</span>${timeHandle("cinemaEnd", ce, d)}</div></div><output>${(ce - cs).toFixed(1)}s</output></div>`;
+    rows += `<div class="edit-track timing-track"><span>电影黑边</span><div class="edit-lane"><div class="timeline-item timing-item cinema-item" data-cinema-clip title="拖动两端调整；右键删除电影黑边" style="left:${(cs / d) * 100}%;width:${((ce - cs) / d) * 100}%">${timeHandle("cinemaStart", cs, d, "left")}<span>${cs.toFixed(1)}–${ce.toFixed(1)}s 黑边</span>${timeHandle("cinemaEnd", ce, d)}</div></div><output>${(ce - cs).toFixed(1)}s</output></div>`;
   }
 
   if (["qte", "hotspot"].includes(n.type)) {
@@ -407,3 +407,54 @@ document.addEventListener("click", (e) => {
   }
   selectEditorPart("interaction");
 });
+
+const cinemaMenu = document.createElement("div");
+cinemaMenu.className = "board-context-menu cinema-context-menu";
+cinemaMenu.hidden = true;
+cinemaMenu.setAttribute("role", "menu");
+cinemaMenu.setAttribute("aria-label", "电影黑边操作");
+cinemaMenu.innerHTML =
+  '<button role="menuitem" class="board-delete" data-delete-cinema>删除电影黑边</button>';
+document.body.append(cinemaMenu);
+function hideCinemaMenu() {
+  cinemaMenu.hidden = true;
+}
+document.addEventListener("contextmenu", (e) => {
+  const clip = e.target.closest?.("[data-cinema-clip]");
+  if (!clip) {
+    hideCinemaMenu();
+    return;
+  }
+  e.preventDefault();
+  cinemaMenu.hidden = false;
+  cinemaMenu.style.left =
+    Math.max(8, Math.min(e.clientX, innerWidth - cinemaMenu.offsetWidth - 8)) +
+    "px";
+  cinemaMenu.style.top =
+    Math.max(8, Math.min(e.clientY, innerHeight - cinemaMenu.offsetHeight - 8)) +
+    "px";
+  cinemaMenu.querySelector("button").focus();
+});
+cinemaMenu.addEventListener("click", (e) => {
+  if (!e.target.closest("[data-delete-cinema]")) return;
+  const n = current();
+  n.cinemaMode = false;
+  delete n.cinemaStart;
+  delete n.cinemaEnd;
+  hideCinemaMenu();
+  save();
+  renderArea();
+  renderProperties();
+  notify("已删除电影黑边");
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!cinemaMenu.contains(e.target)) hideCinemaMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (!cinemaMenu.hidden && e.key === "Escape") {
+    e.preventDefault();
+    hideCinemaMenu();
+  }
+});
+window.addEventListener("resize", hideCinemaMenu);
+document.addEventListener("scroll", hideCinemaMenu, true);
