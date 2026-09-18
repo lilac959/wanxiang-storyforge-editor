@@ -176,7 +176,8 @@ function usePublishedProject(envelope) {
     media.set(id, new URL("/api/media/" + id.slice(12), location.origin).href);
   }
   document.title = project.name;
-  document.querySelector("#gameTitle").textContent = project.name;
+  const title = document.querySelector("#gameTitle");
+  if (title) title.textContent = project.name;
 }
 async function refreshPublishedProject() {
   const response = await cloudResponse(
@@ -196,25 +197,16 @@ async function startPublishedGame() {
     document.querySelector("#gameUpdate").hidden = true;
     await start(true);
   } catch (error) {
-    document.querySelector("#gameMessage").textContent = error.message;
+    const message = document.querySelector("#gameMessage");
+    if (message) message.textContent = error.message;
     notify(error.message);
   } finally {
     gameStarting = false;
   }
 }
 async function bootPublishedGame() {
-  document.querySelector("#gameStart").onclick = startPublishedGame;
   document.querySelector("#gameUpdate").onclick = startPublishedGame;
-  try {
-    await refreshPublishedProject();
-    document.querySelector("#gameMessage").textContent =
-      "点击开始，进入万象环轨";
-    document.querySelector("#gameStart").disabled = false;
-  } catch (error) {
-    document.querySelector("#gameMessage").textContent = error.message;
-    document.querySelector("#gameStart").disabled = false;
-    document.querySelector("#gameStart").textContent = "重新加载";
-  }
+  await startPublishedGame();
   setInterval(async () => {
     if (document.hidden || gameStarting) return;
     try {
