@@ -7,6 +7,12 @@ let cloudSaving = false,
   editorDirty = false,
   editorReady = false;
 const cloudAssetCache = new Map();
+// A new media URL bypasses responses cached before the expired uploads were restored.
+function cloudMediaUrl(id) {
+  const url = new URL("/api/media/" + id.slice(12), location.origin);
+  url.searchParams.set("mediaRevision", "restored-20260920");
+  return url.href;
+}
 function cloudToken() {
   return (
     sessionStorage.getItem("storyforge-publish-token") ||
@@ -83,7 +89,7 @@ async function restoreEditorDraft() {
   const draft=JSON.parse(saved);
   if (!valid(draft)) { notify("本机备份无效"); return; }
   project=draft;
-  for(const id of projectAssets(project)) if (/^asset-cloud-[a-f0-9]{64}$/.test(id)) media.set(id,new URL("/api/media/"+id.slice(12),location.origin).href);
+  for(const id of projectAssets(project)) if (/^asset-cloud-[a-f0-9]{64}$/.test(id)) media.set(id,cloudMediaUrl(id));
   for(const id of projectAssets(project)) { const blob=await getBlob(id); if(blob)media.set(id,URL.createObjectURL(blob)); }
   selected=project.nodes[0].id;
   page="story";
@@ -253,7 +259,7 @@ function usePublishedProject(envelope) {
   if (cloudPlayer) media.clear();
   for (const id of projectAssets(project).filter(Boolean)) {
     if (!/^asset-cloud-[a-f0-9]{64}$/.test(id)) throw Error("游戏素材地址无效");
-    media.set(id, new URL("/api/media/" + id.slice(12), location.origin).href);
+    media.set(id, cloudMediaUrl(id));
   }
   document.title = project.name;
   const title = document.querySelector("#gameTitle");
