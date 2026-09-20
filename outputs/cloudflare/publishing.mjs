@@ -75,9 +75,7 @@ export async function publishing(request, env) {
       size > 20 * 1024 * 1024
     )
       return json({ error: "素材分块无效" }, 400);
-    await store.put(`${mediaKey(hash)}/part/${index}`, request.body, {
-      expirationTtl: 86400,
-    });
+    await store.put(`${mediaKey(hash)}/part/${index}`, request.body);
     return json({ ok: true });
   }
   if (base && request.method === "POST") {
@@ -110,6 +108,7 @@ export async function publishing(request, env) {
     return json({ ok: true });
   }
   if (path === "/api/publish" && request.method === "POST") {
+    if (request.headers.get("X-Deploy-Protocol") !== "2") return json({error:"编辑器已更新，请刷新页面后使用部署按钮"},426);
     const text = await request.text();
     if (text.length > 2 * 1024 * 1024) return json({ error: "配置过大" }, 413);
     let p;
@@ -161,6 +160,7 @@ export async function publishing(request, env) {
       ok: true,
       version: envelope.version,
       updatedAt: envelope.updatedAt,
+      revision: await textEtag(JSON.stringify(envelope)),
     });
   }
   return json({ error: "接口不存在" }, 404);

@@ -1,11 +1,11 @@
-// Local drafts stay on this browser. Only explicit Save publishes a snapshot.
+// Deployment is explicit. Editors load the shared published snapshot.
 const cloudPlayer = document.documentElement.dataset.mode === "game";
 let cloudSaving = false,
   gameVersion = "",
   gameStarting = false,
-  cloudPendingSnapshot = null,
-  cloudAutosyncTimer = null,
-  cloudAutosyncReady = false;
+  editorRevision = null,
+  editorDirty = false,
+  editorReady = false;
 const cloudAssetCache = new Map();
 function cloudToken() {
   return (
@@ -34,28 +34,67 @@ async function retryCloudWrite(makeRequest, shouldRetry, attempts = 8) {
   }
   throw error;
 }
-function scheduleCloudPublish(snapshot, delay = 1200) {
-  if (cloudPlayer || !cloudAutosyncReady || !cloudToken()) return;
-  cloudPendingSnapshot = structuredClone(snapshot);
-  clearTimeout(cloudAutosyncTimer);
-  document.querySelector("#saved").textContent = "● 已保存本机 · 等待云端同步";
-  cloudAutosyncTimer = setTimeout(() => {
-    const next = cloudPendingSnapshot;
-    cloudPendingSnapshot = null;
-    publishProject(next, false);
-  }, delay);
+function markEditorDraft() {
+  if (!editorReady || cloudPlayer) return;
+  editorDirty = true;
+  localStorage.setItem("storyforge-draft-base", editorRevision || "none");
+  document.querySelector("#saved").textContent = "● 草稿已保存 · 尚未部署";
 }
-function enableCloudAutosync(snapshot) {
-  cloudAutosyncReady = true;
-  scheduleCloudPublish(snapshot, 300);
+function backupEditorDraft() {
+  const saved = localStorage.getItem("storyforge-project");
+  if (saved && !localStorage.getItem("storyforge-draft-backup")) localStorage.setItem("storyforge-draft-backup", saved);
+}
+async function loadEditorDeployment() {
+  const response = await fetch("/api/project", {cache:"no-store",signal:AbortSignal.timeout(30000)});
+  if (response.status === 404) { editorRevision = "none"; return false; }
+  await cloudResponse(response);
+  const envelope = await response.json();
+  if (!valid(envelope.project)) throw Error("云端配置无效，本机草稿已保留");
+  backupEditorDraft();
+  usePublishedProject(envelope);
+  editorRevision = response.headers.get("X-Project-Revision") || response.headers.get("ETag")?.replace(/^W\//,"");
+  editorDirty = false;
+  localStorage.setItem("storyforge-project",JSON.stringify(project));
+  localStorage.setItem("storyforge-draft-base",editorRevision);
+  selected = project.nodes[0].id;
+  page = "story";
+  render();
+  document.querySelector("#saved").textContent = "● 已加载部署版本";
+  return true;
+}
+function watchEditorDeployment() {
+  editorReady = true;
+  document.querySelector("#restoreDraft").hidden = !localStorage.getItem("storyforge-draft-backup");
+  setInterval(async () => {
+    if (document.hidden || cloudSaving || activeRun) return;
+    try {
+      const r = await cloudResponse(await fetch("/api/project",{cache:"no-store",signal:AbortSignal.timeout(10000)}));
+      const revision=r.headers.get("X-Project-Revision") || r.headers.get("ETag")?.replace(/^W\//,"");
+      if (revision === editorRevision) return;
+      if (editorDirty) {
+        document.querySelector("#saved").textContent="● 云端有新部署 · 请先导出草稿再刷新";
+      } else await loadEditorDeployment();
+    } catch {}
+  },30000);
+}
+async function restoreEditorDraft() {
+  const saved=localStorage.getItem("storyforge-draft-backup");
+  if (!saved) return;
+  const draft=JSON.parse(saved);
+  if (!valid(draft)) { notify("本机备份无效"); return; }
+  project=draft;
+  for(const id of projectAssets(project)) if (/^asset-cloud-[a-f0-9]{64}$/.test(id)) media.set(id,new URL("/api/media/"+id.slice(12),location.origin).href);
+  for(const id of projectAssets(project)) { const blob=await getBlob(id); if(blob)media.set(id,URL.createObjectURL(blob)); }
+  selected=project.nodes[0].id;
+  page="story";
+  save();
+  render();
+  notify("已恢复本机草稿；检查后点击部署");
 }
 async function publishProject(snapshot, interactive = true) {
-  clearTimeout(cloudAutosyncTimer);
-  cloudAutosyncTimer = null;
-  if (cloudSaving) {
-    cloudPendingSnapshot = structuredClone(snapshot);
-    return;
-  }
+  if (cloudSaving) return;
+  if (!editorRevision) { notify("尚未读取云端版本，请联网刷新后部署"); return; }
+  const draftAtStart = JSON.stringify(project);
   let token = cloudToken();
   if (!token) {
     if (!interactive) return;
@@ -69,18 +108,10 @@ async function publishProject(snapshot, interactive = true) {
     token = token.trim();
   }
   cloudSaving = true;
-  const button = document.querySelector("#saveConfig");
+  const button = document.querySelector("#deployProject");
   button.disabled = true;
   try {
-    const current = await fetch("/api/project", {
-      cache: "no-store",
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!current.ok && current.status !== 404) await cloudResponse(current);
-    const revision = current.ok
-      ? current.headers.get("X-Project-Revision") ||
-        current.headers.get("ETag")?.replace(/^W\//, "")
-      : "none";
+    const revision = editorRevision;
     const ids = [...new Set(projectAssets(snapshot).filter(Boolean))];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
@@ -178,26 +209,31 @@ async function publishProject(snapshot, interactive = true) {
       remapProjectSource(snapshot, id, "asset-cloud-" + item.hash);
     }
     button.textContent = "发布配置…";
-    await retryCloudWrite(
+    const publishedResponse = await retryCloudWrite(
       () => fetch("/api/publish", {
         method: "POST",
         headers: {
           Authorization: "Bearer " + token,
           "Content-Type": "application/json",
           "If-Match": revision,
+          "X-Deploy-Protocol": "2",
         },
         body: JSON.stringify(snapshot),
         signal: AbortSignal.timeout(30000),
       }),
       (error) => error.status === 400 && error.message === "有素材尚未上传完成",
     );
-    document.querySelector("#saved").textContent = "● 本次保存已同步游戏站";
-    notify("保存成功，独立游戏站已更新");
+    const result = await publishedResponse.json();
+    editorRevision = result.revision;
+    editorDirty = JSON.stringify(project) !== draftAtStart;
+    localStorage.setItem("storyforge-draft-base",editorRevision);
+    document.querySelector("#saved").textContent = editorDirty ? "● 部署成功 · 仍有新的本机修改待部署" : "● 已部署 · 编辑器与游戏站共用此版本";
+    notify("部署成功，其他电脑及游戏站将加载完整部署版本");
   } catch (error) {
     if (error.status === 401) {
       localStorage.removeItem("storyforge-publish-token");
       sessionStorage.removeItem("storyforge-publish-token");
-      cloudPendingSnapshot = null;
+
     }
     document.querySelector("#saved").textContent =
       "● 已保存本机 · 云端同步失败";
@@ -206,12 +242,7 @@ async function publishProject(snapshot, interactive = true) {
   } finally {
     cloudSaving = false;
     button.disabled = false;
-    button.textContent = "保存配置";
-    if (cloudPendingSnapshot && cloudToken()) {
-      const next = cloudPendingSnapshot;
-      cloudPendingSnapshot = null;
-      setTimeout(() => publishProject(next, false));
-    }
+    button.textContent = "部署";
   }
 }
 function usePublishedProject(envelope) {
@@ -219,7 +250,7 @@ function usePublishedProject(envelope) {
   project = envelope.project;
   gameVersion = envelope.version;
   selected = project.nodes[0].id;
-  media.clear();
+  if (cloudPlayer) media.clear();
   for (const id of projectAssets(project).filter(Boolean)) {
     if (!/^asset-cloud-[a-f0-9]{64}$/.test(id)) throw Error("游戏素材地址无效");
     media.set(id, new URL("/api/media/" + id.slice(12), location.origin).href);
@@ -280,7 +311,7 @@ if (!cloudPlayer) {
     history.replaceState(null, "", location.pathname + location.search);
   }
   addEventListener("beforeunload", (event) => {
-    if (!cloudSaving && !cloudPendingSnapshot && !cloudAutosyncTimer) return;
+    if (!cloudSaving) return;
     event.preventDefault();
     event.returnValue = "";
   });
