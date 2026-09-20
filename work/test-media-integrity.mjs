@@ -1,0 +1,12 @@
+import {publishing} from '../outputs/cloudflare/publishing.mjs';
+import assert from 'node:assert/strict';
+const hash='a'.repeat(64), data=new Map(),store={async get(k,type){const value=data.get(k);if(value===undefined)return null;if(type==='json')return JSON.parse(value);if(type==='stream')return new Blob([value]).stream();return value},async put(k,v,options){assert.equal(options?.expirationTtl,undefined);data.set(k,v)}};
+const env={PROJECT_STORE:store,PUBLISH_TOKEN:'test'};
+data.set('media/'+hash+'/meta',JSON.stringify({hash,type:'image/png',size:3,parts:1,partSizes:[3]}));
+assert.equal((await publishing(new Request('https://test/api/media/'+hash,{method:'HEAD'}),env)).status,404);
+assert.equal((await publishing(new Request('https://test/api/media/'+hash),env)).status,404);
+const p={version:1,loading:{image:'asset-cloud-'+hash},splash:{},nodes:[{}]};
+assert.equal((await publishing(new Request('https://test/api/publish',{method:'POST',headers:{Authorization:'Bearer test','X-Deploy-Protocol':'2','If-Match':'none'},body:JSON.stringify(p)}),env)).status,400);
+await publishing(new Request('https://test/api/media/'+hash+'/part/0',{method:'PUT',headers:{Authorization:'Bearer test','X-Total-Parts':'1','Content-Length':'3'},body:'abc'}),env);
+assert.equal((await publishing(new Request('https://test/api/media/'+hash,{method:'HEAD'}),env)).status,200);
+console.log('PASS missing media cannot be published or reported healthy; uploads have no expiration');

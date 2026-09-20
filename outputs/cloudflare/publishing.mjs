@@ -19,7 +19,13 @@ const sources = (p) =>
 const mediaKey = (hash) => `media/${hash}`;
 async function metadata(store, hash) {
   const data = await store.get(mediaKey(hash) + "/meta", "json");
-  return data && data.hash === hash ? data : null;
+  if (!data || data.hash !== hash) return null;
+  for (let i = 0; i < data.parts; i++) {
+    const part = await store.get(`${mediaKey(hash)}/part/${i}`, "stream");
+    if (!part) return null;
+    await part.cancel();
+  }
+  return data;
 }
 function authorized(request, env) {
   return (
