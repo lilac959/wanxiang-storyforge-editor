@@ -172,7 +172,10 @@ export class Runtime {
   }
   follow(target) {
     if (target.kind === "scene") this.enter(target.sceneId);
-    else if (["end", "unlinked"].includes(target.kind)) this.complete();
+    else if (target.kind === "home") {
+      this.stop();
+      this.emit("home");
+    } else if (["end", "unlinked"].includes(target.kind)) this.complete();
     else if (target.kind === "seek") this.seek(target.timeMs);
   }
   seek(time) {

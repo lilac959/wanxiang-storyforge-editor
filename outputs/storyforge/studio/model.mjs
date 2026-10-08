@@ -486,7 +486,7 @@ export function validate(p, { publish = false } = {}) {
   const target = (t, s) => {
     if (
       !t ||
-      !["continue", "scene", "seek", "end", "unlinked"].includes(t.kind)
+      !["continue", "scene", "seek", "end", "unlinked", "home"].includes(t.kind)
     ) {
       error("剧情去向无效", s.id, "structure");
       return;

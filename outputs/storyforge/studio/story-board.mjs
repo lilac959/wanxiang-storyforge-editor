@@ -1,35 +1,61 @@
 import { esc } from "./storage.mjs";
-import { duration } from "./model.mjs";
+import { duration, reachable } from "./model.mjs";
 import { visualClips } from "./timeline.mjs";
+import {
+  LOADING,
+  SPLASH,
+  NODE_WIDTH as W,
+  specialNode,
+  flowNodes,
+  arrangeFlow,
+  flowPorts,
+  flowPositions,
+  routeFlow,
+  pathData,
+} from "./flow-layout.mjs";
+const svgEl = (name) =>
+  document.createElementNS("http://www.w3.org/2000/svg", name);
 export class StoryBoard {
   constructor(host, api) {
+    this.lifecycle = new AbortController();
+    this.listen = (target, type, fn) =>
+      target.addEventListener(type, fn, { signal: this.lifecycle.signal });
     this.host = host;
     this.api = api;
     this.scale = 1;
     this.selected = new Set();
     this.mode = "pan";
     this.pending = null;
+    this.cards = new Map();
+    this.edges = new Map();
+    this.positions = {};
+    host.innerHTML =
+      '<div class="graph-space"><div class="graph-board"><svg class="graph-lines"><defs><marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#9d94b6" stroke="none"/></marker></defs></svg><div class="graph-guides"></div></div></div>';
+    this.space = host.firstElementChild;
+    this.surface = this.space.firstElementChild;
+    this.svg = this.surface.querySelector("svg");
+    this.guides = this.surface.querySelector(".graph-guides");
     host.addEventListener("pointerdown", (e) => this.pointer(e));
-    host.addEventListener("dblclick", (e) => {
-      const c = e.target.closest("[data-graph-scene]");
-      if (c && !e.target.closest("button")) api.open(c.dataset.graphScene);
-    });
     host.addEventListener("click", (e) => this.click(e));
+    host.addEventListener("dblclick", (e) => {
+      if (e.target.closest("button,[data-line-from]")) return;
+      const n = e.target.closest("[data-graph-scene]");
+      n ? api.open(n.dataset.graphScene) : api.create(this.point(e));
+    });
     host.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      const c = e.target.closest("[data-graph-scene]");
-      if (c) {
-        this.selected = new Set([c.dataset.graphScene]);
-        api.select(c.dataset.graphScene);
-        api.menu(c.dataset.graphScene);
-      } else api.create();
+      const n = e.target.closest("[data-graph-scene]");
+      if (n) {
+        this.choose(n.dataset.graphScene);
+        api.menu(n.dataset.graphScene);
+      } else api.create(this.point(e));
     });
     host.addEventListener(
       "wheel",
       (e) => {
         if (e.ctrlKey || e.metaKey) {
           e.preventDefault();
-          this.zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+          this.zoom(Math.exp(-e.deltaY * 0.002), e);
         }
       },
       { passive: false },
@@ -37,130 +63,367 @@ export class StoryBoard {
     host.addEventListener("dragover", (e) => e.preventDefault());
     host.addEventListener("drop", (e) => {
       e.preventDefault();
-      api.drop(e.dataTransfer);
+      api.drop(e.dataTransfer, this.point(e));
+    });
+    this.listen(document, "keydown", (e) => {
+      if (
+        host.closest("[hidden]") ||
+        host.clientWidth === 0 ||
+        e.target.closest("input,textarea,select,dialog")
+      )
+        return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        this.spaceHeld = true;
+        host.classList.add("panning");
+      }
+      if (e.key === "Escape") {
+        this.cancelDrag?.();
+        this.pending = null;
+        this.activeEdge = null;
+        this.highlight();
+      }
+    });
+    this.listen(document, "keyup", (e) => {
+      if (e.code === "Space") {
+        this.spaceHeld = false;
+        host.classList.remove("panning");
+      }
+    });
+    this.listen(window, "blur", () => {
+      this.spaceHeld = false;
+      this.cancelDrag?.();
     });
   }
+  dispose() {
+    this.cancelDrag?.();
+    this.lifecycle.abort();
+  }
+  point(e) {
+    const r = this.host.getBoundingClientRect();
+    return {
+      x: Math.max(20, (e.clientX - r.left + this.host.scrollLeft) / this.scale),
+      y: Math.max(20, (e.clientY - r.top + this.host.scrollTop) / this.scale),
+    };
+  }
+  ports(n) {
+    return flowPorts(this.project, n, this.api.ports);
+  }
   render(project, selected) {
+    if (this.project?.id !== project.id) {
+      this.selected = new Set([selected]);
+      this.activeEdge = null;
+      this.scale = 1;
+      this.host.scrollTo(0, 0);
+    }
     this.project = project;
-    this.selected = new Set(
-      [...this.selected].filter((id) =>
-        project.scenes.some((s) => s.id === id),
-      ),
-    );
-    if (!this.selected.has(selected)) this.selected = new Set([selected]);
-    const pos = project.editor.positions,
-      ports = this.api.ports;
+    this.nodes = flowNodes(project);
+    this.logicalPositions = arrangeFlow(project, this.api.ports);
+    this.positions = flowPositions(project);
+    const ids = new Set(this.nodes.map((n) => n.id));
+    this.selected = new Set([...this.selected].filter((id) => ids.has(id)));
+    for (const [id, el] of this.cards)
+      if (!ids.has(id)) {
+        el.remove();
+        this.cards.delete(id);
+      }
+    for (const n of this.nodes) {
+      let el = this.cards.get(n.id);
+      if (!el) {
+        el = document.createElement("article");
+        el.tabIndex = 0;
+        el.className = "graph-card";
+        el.dataset.graphScene = n.id;
+        el.innerHTML =
+          '<div class="node-title"><i class="node-icon"></i><h3></h3><button class="node-menu">···</button></div><div class="node-thumb"></div><div class="node-meta"><span></span><button>编辑 ↗</button></div><div class="node-ports"></div><i class="node-input"></i>';
+        this.surface.append(el);
+        this.cards.set(n.id, el);
+      }
+      el.setAttribute(
+        "aria-label",
+        (specialNode(n.id) ? "特殊节点 " : "场景 ") + n.name,
+      );
+      el.querySelector("h3").textContent = n.name;
+      el.querySelector("h3").title = n.name;
+      const icon = el.querySelector(".node-icon");
+      icon.className = "node-icon " + n.role;
+      icon.textContent =
+        { loading: "◌", splash: "◈", ending: "◆", death: "◇" }[n.role] || "▣";
+      const menu = el.querySelector(".node-menu");
+      menu.dataset.nodeMenu = n.id;
+      menu.setAttribute("aria-label", n.name + "菜单");
+      const open = el.querySelector(".node-meta button");
+      open.dataset.nodeOpen = n.id;
+      open.title = "进入编辑";
+      const ps = this.ports(n);
+      el.querySelector(".node-meta span").textContent = specialNode(n.id)
+        ? n.id === LOADING
+          ? "准备资源"
+          : "等待开始"
+        : (duration(n) / 1000).toFixed(1) +
+          "s · " +
+          ps.filter((p) => p.target.kind !== "end").length +
+          " 个出口";
+      const signature = JSON.stringify(ps);
+      const ph = el.querySelector(".node-ports");
+      if (ph.dataset.signature !== signature) {
+        ph.dataset.signature = signature;
+        ph.innerHTML = ps
+          .map(
+            (p) =>
+              `<button class="node-port ${p.target.kind === "unlinked" ? "unlinked" : ""}" data-port="${esc(p.path)}" data-from="${esc(n.id)}" ${p.fixed ? 'data-fixed="true"' : ""} title="${esc(p.label)}"><span>${esc(p.label)}</span><small>${esc(p.target.kind === "scene" ? this.nodes.find((n) => n.id === p.target.sceneId)?.name || "目标缺失" : { end: "结束", unlinked: "待连接" }[p.target.kind] || "")}</small><i></i></button>`,
+          )
+          .join("");
+      }
+      const aid =
+        n.id === LOADING
+          ? project.loading.video || project.loading.image
+          : n.id === SPLASH
+            ? project.splash.video
+            : visualClips(n)[0]?.assetId;
+      const a = project.assets[aid],
+        thumb = el.querySelector(".node-thumb"),
+        key = JSON.stringify(a || null);
+      if (thumb.dataset.asset !== key) {
+        thumb.dataset.asset = key;
+        thumb.textContent = specialNode(n.id)
+          ? n.name
+          : n.role === "ending"
+            ? "结局"
+            : "场景";
+        if (a)
+          this.api
+            .assetUrl(a)
+            .then((url) => {
+              if (!thumb.isConnected || thumb.dataset.asset !== key) return;
+              const media = document.createElement(
+                a.kind === "video" ? "video" : "img",
+              );
+              if (a.kind === "video") {
+                media.muted = true;
+                media.playsInline = true;
+                media.preload = "metadata";
+              }
+              media.src = url;
+              media.draggable = false;
+              thumb.replaceChildren(media);
+            })
+            .catch(() => {});
+      }
+    }
+    const connected = reachable(project),
+      loose = this.nodes.filter(
+        (n) => !specialNode(n.id) && !connected.has(n.id),
+      );
+    this.looseLabel ||= Object.assign(document.createElement("div"), {
+      className: "flow-loose-label",
+      textContent: "待连接区域",
+    });
+    this.surface.append(this.looseLabel);
+    this.looseLabel.hidden = !loose.length;
+    if (loose.length) {
+      this.looseLabel.style.left =
+        Math.min(...loose.map((n) => this.positions[n.id].x)) + "px";
+      this.looseLabel.style.top =
+        Math.min(...loose.map((n) => this.positions[n.id].y)) - 35 + "px";
+    }
+    this.positionCards();
+    this.highlight();
+  }
+  positionCards() {
+    for (const [id, el] of this.cards) {
+      const p = this.positions[id];
+      el.style.left = p.x + "px";
+      el.style.top = p.y + "px";
+    }
+    this.measure();
+  }
+  measure() {
     this.size = {
       width: Math.max(
         1400,
-        ...project.scenes.map((s) => (pos[s.id]?.x || 60) + 370),
+        ...this.nodes.map((n) => this.positions[n.id].x + W + 180),
       ),
       height: Math.max(
         900,
-        ...project.scenes.map(
-          (s) => (pos[s.id]?.y || 60) + 240 + ports(s).length * 34,
+        ...this.nodes.map(
+          (n) => this.positions[n.id].y + this.height(n.id) + 180,
         ),
       ),
     };
-    const edges = project.scenes.flatMap((s) =>
-      ports(s)
-        .filter((x) => x.target.kind === "scene")
-        .map((x) => ({ s, port: x, index: ports(s).indexOf(x) })),
-    );
-    this.host.innerHTML = `<div class="graph-space" style="width:${this.size.width * this.scale}px;height:${this.size.height * this.scale}px"><div class="graph-board" style="width:${this.size.width}px;height:${this.size.height}px;transform:scale(${this.scale})"><svg class="graph-lines">${edges
-      .map(({ s, port, index }) => {
-        const f = pos[s.id] || { x: 60, y: 60 },
-          t = pos[port.target.sceneId];
-        if (!t) return "";
-        const x = f.x + 268,
-          y = f.y + 174 + index * 34;
-        return `<path data-line-from="${s.id}" data-line-path="${port.path}" d="M${x},${y} C${x + 90},${y} ${t.x - 90},${t.y + 40} ${t.x},${t.y + 40}"/>`;
-      })
-      .join("")}</svg>${project.scenes
-      .map((s) => {
-        const xy = pos[s.id] || { x: 60, y: 60 };
-        return `<article tabindex="0" aria-label="场景 ${esc(s.name)}" class="graph-card ${this.selected.has(s.id) ? "selected" : ""}" data-graph-scene="${s.id}" style="left:${xy.x}px;top:${xy.y}px"><div class="node-title"><i class="node-icon ${s.role}">${s.role === "ending" ? "◈" : "▣"}</i><h3>${esc(s.name)}</h3><button data-node-menu="${s.id}" aria-label="${esc(s.name)}菜单">···</button></div><div class="node-thumb" data-thumb="${s.id}"><span>${s.role === "ending" ? "结局" : "场景"}</span></div><div class="node-meta"><span>${project.entryId === s.id ? "入口 · " : ""}${(duration(s) / 1000).toFixed(1)}s</span><span>${s.events.length} 处互动</span><button data-node-open="${s.id}" title="进入编辑">编辑 ↗</button></div>${ports(
-          s,
-        )
-          .map(
-            (port) =>
-              `<button class="node-port ${this.pending?.sceneId === s.id && this.pending.path === port.path ? "pending" : ""} ${port.target.kind === "unlinked" ? "unlinked" : ""}" data-port="${port.path}" data-from="${s.id}" title="${esc(port.label)}"><span>${esc(port.label)}</span><small>${esc(port.target.kind === "scene" ? project.scenes.find((x) => x.id === port.target.sceneId)?.name || "目标缺失" : { continue: "继续", end: "结束", seek: "定位", unlinked: "待连接" }[port.target.kind])}</small><i></i></button>`,
-          )
-          .join("")}</article>`;
-      })
-      .join("")}</div></div>`;
-    for (const s of project.scenes) {
-      const c = visualClips(s)[0],
-        a = project.assets[c?.assetId];
-      if (!a) continue;
-      const host = this.host.querySelector(`[data-thumb="${s.id}"]`);
-      this.api
-        .assetUrl(a)
-        .then((url) => {
-          if (!host.isConnected) return;
-          const el = document.createElement(
-            a.kind === "video" ? "video" : "img",
-          );
-          if (a.kind === "video") {
-            el.muted = true;
-            el.playsInline = true;
-            el.preload = "metadata";
-          }
-          el.src = url;
-          host.replaceChildren(el);
-        })
-        .catch(() => {});
-    }
-    this.api.selection(this.selected.size);
-    this.drawMini();
+    this.applyScale();
+  }
+  height(id) {
+    return this.cards.get(id)?.offsetHeight || 164;
+  }
+  applyScale() {
+    this.surface.style.width = this.size.width + "px";
+    this.surface.style.height = this.size.height + "px";
+    this.surface.style.transform = `scale(${this.scale})`;
+    this.space.style.width = this.size.width * this.scale + "px";
+    this.space.style.height = this.size.height * this.scale + "px";
+    this.surface.classList.toggle("overview", this.scale < 0.48);
+    this.api.zoom(this.scale);
+  }
+  choose(id, add = false) {
+    this.activeEdge = null;
+    if (add) {
+      this.selected.has(id) ? this.selected.delete(id) : this.selected.add(id);
+    } else this.selected = new Set([id]);
+    this.api.select(id);
+    this.highlight();
   }
   highlight() {
-    for (const el of this.host.querySelectorAll("[data-graph-scene]"))
-      el.classList.toggle("selected", this.selected.has(el.dataset.graphScene));
-    this.api.selection(this.selected.size);
+    for (const [id, el] of this.cards)
+      el.classList.toggle("selected", this.selected.has(id));
+    this.api.selection(
+      [...this.selected].filter((id) => !specialNode(id)).length,
+    );
+    this.measure();
+    this.lines();
     this.drawMini();
+  }
+  lines() {
+    const wanted = new Set(),
+      rects = this.nodes.map((n) => ({
+        id: n.id,
+        ...this.positions[n.id],
+        w: W,
+        h: this.height(n.id),
+      }));
+    let lane = 0;
+    for (const n of this.nodes) {
+      const ps = this.ports(n);
+      for (let i = 0; i < ps.length; i++) {
+        const port = ps[i],
+          to = port.target.sceneId;
+        if (port.target.kind !== "scene" || !this.positions[to]) continue;
+        const key = n.id + "|" + port.path;
+        wanted.add(key);
+        let edge = this.edges.get(key);
+        if (!edge) {
+          const g = svgEl("g"),
+            path = svgEl("path"),
+            hit = svgEl("path"),
+            text = svgEl("text"),
+            handle = svgEl("circle");
+          path.classList.add("flow-line");
+          path.setAttribute("marker-end", "url(#flow-arrow)");
+          hit.classList.add("flow-hit");
+          for (const el of [path, hit, handle]) {
+            el.dataset.lineFrom = n.id;
+            el.dataset.linePath = port.path;
+          }
+          text.classList.add("flow-label");
+          handle.classList.add("flow-handle");
+          handle.dataset.reconnect = "true";
+          handle.setAttribute("r", "6");
+          g.append(path, hit, text, handle);
+          this.svg.append(g);
+          edge = { g, path, hit, text, handle };
+          this.edges.set(key, edge);
+        }
+        const f = this.positions[n.id],
+          t = this.positions[to],
+          expanded = this.selected.has(n.id) && this.scale >= 0.48;
+        const portEl = this.cards.get(n.id).querySelectorAll(".node-port")[i];
+        const start = {
+            x: f.x + W,
+            y:
+              f.y +
+              (expanded && portEl
+                ? portEl.offsetTop + portEl.offsetHeight / 2
+                : 80),
+          },
+          end = { x: t.x, y: t.y + 40 },
+          back = t.x <= f.x;
+        const isReturn =
+          this.logicalPositions[to].x <= this.logicalPositions[n.id].x;
+        const points = routeFlow(start, end, rects, { back, lane: lane++ }),
+          d = pathData(points);
+        edge.path.setAttribute("d", d);
+        edge.hit.setAttribute("d", d);
+        edge.handle.setAttribute("cx", end.x - 12);
+        edge.handle.setAttribute("cy", end.y);
+        const active =
+            this.activeEdge?.from === n.id &&
+            this.activeEdge.path === port.path,
+          related = this.selected.has(n.id) || this.selected.has(to);
+        edge.g.classList.toggle("related", related);
+        edge.g.classList.toggle(
+          "dim",
+          this.selected.size > 0 && !related && !active,
+        );
+        edge.g.classList.toggle("active", active);
+        edge.g.classList.toggle("return-line", isReturn);
+        edge.g.classList.toggle("fixed-line", !!port.fixed);
+        edge.handle.style.display = active && !port.fixed ? "" : "none";
+        edge.text.textContent = (isReturn ? "返回 · " : "") + port.label;
+        edge.text.setAttribute("x", start.x + 24);
+        edge.text.setAttribute("y", start.y - 8);
+        edge.text.style.display = related || active ? "" : "none";
+      }
+    }
+    for (const [key, e] of this.edges)
+      if (!wanted.has(key)) {
+        e.g.remove();
+        this.edges.delete(key);
+      }
   }
   drawMini() {
     const mini = this.api.mini();
     if (!mini) return;
-    mini.innerHTML = `<svg viewBox="0 0 ${this.size.width} ${this.size.height}">${this.project.scenes
-      .map((s) => {
-        const p = this.project.editor.positions[s.id] || { x: 60, y: 60 };
-        return `<rect data-mini="${s.id}" x="${p.x}" y="${p.y}" width="268" height="150" rx="15" fill="${this.selected.has(s.id) ? "#7770ed" : "#c8cbd7"}"/>`;
+    mini.innerHTML = `<svg viewBox="0 0 ${this.size.width} ${this.size.height}">${this.nodes
+      .map((n) => {
+        const p = this.positions[n.id];
+        return `<rect data-mini="${esc(n.id)}" x="${p.x}" y="${p.y}" width="240" height="150" rx="8" fill="${this.selected.has(n.id) ? "#7764dc" : "#bfc3d3"}"/>`;
       })
       .join("")}</svg>`;
     mini.onclick = (e) => {
-      const id = e.target.dataset.mini;
-      if (id) this.locate(id);
+      if (e.target.dataset.mini) this.locate(e.target.dataset.mini);
     };
   }
-  zoom(factor) {
-    this.scale = Math.max(0.25, Math.min(2, this.scale * factor));
-    this.render(this.project, [...this.selected][0]);
-    this.api.zoom(this.scale);
+  zoom(factor, event) {
+    const r = this.host.getBoundingClientRect(),
+      x = event ? event.clientX - r.left : this.host.clientWidth / 2,
+      y = event ? event.clientY - r.top : this.host.clientHeight / 2,
+      wx = (this.host.scrollLeft + x) / this.scale,
+      wy = (this.host.scrollTop + y) / this.scale;
+    const oldOverview = this.scale < 0.48;
+    this.scale = Math.max(0.15, Math.min(2, this.scale * factor));
+    this.applyScale();
+    this.host.scrollLeft = wx * this.scale - x;
+    this.host.scrollTop = wy * this.scale - y;
+    if (oldOverview !== this.scale < 0.48) {
+      this.measure();
+      this.lines();
+    }
   }
   fit() {
     this.scale = Math.max(
-      0.25,
+      0.15,
       Math.min(
         1,
         (this.host.clientWidth - 60) / this.size.width,
-        (this.host.clientHeight - 50) / this.size.height,
+        (this.host.clientHeight - 60) / this.size.height,
       ),
     );
-    this.render(this.project, [...this.selected][0]);
+    this.applyScale();
     this.host.scrollTo(0, 0);
-    this.api.zoom(this.scale);
+    this.lines();
   }
   locate(id) {
-    const p = this.project.editor.positions[id];
+    const p = this.positions[id];
     if (!p) return;
     this.host.scrollTo({
       left: Math.max(
         0,
-        p.x * this.scale - this.host.clientWidth / 2 + 134 * this.scale,
+        p.x * this.scale - this.host.clientWidth / 2 + (W * this.scale) / 2,
       ),
-      top: Math.max(0, p.y * this.scale - 80),
+      top: Math.max(
+        0,
+        p.y * this.scale - this.host.clientHeight / 2 + 80 * this.scale,
+      ),
       behavior: "smooth",
     });
   }
@@ -174,203 +437,251 @@ export class StoryBoard {
       line = e.target.closest("[data-line-from]"),
       port = e.target.closest("[data-port]"),
       card = e.target.closest("[data-graph-scene]");
-    if (open) {
-      this.api.open(open.dataset.nodeOpen);
-      return;
-    }
+    if (open) return this.api.open(open.dataset.nodeOpen);
     if (menu) {
-      this.selected = new Set([menu.dataset.nodeMenu]);
-      this.api.select(menu.dataset.nodeMenu);
-      this.api.menu(menu.dataset.nodeMenu);
-      return;
+      this.choose(menu.dataset.nodeMenu);
+      return this.api.menu(menu.dataset.nodeMenu);
     }
     if (line) {
-      this.api.connection(line.dataset.lineFrom, line.dataset.linePath);
-      return;
+      this.activeEdge = {
+        from: line.dataset.lineFrom,
+        path: line.dataset.linePath,
+      };
+      this.lines();
+      return this.api.edge?.(this.activeEdge);
     }
     if (port) {
-      this.pending = { sceneId: port.dataset.from, path: port.dataset.port };
-      this.api.connection(this.pending.sceneId, this.pending.path);
-      return;
+      if (port.dataset.fixed) return;
+      return this.api.connection(port.dataset.from, port.dataset.port);
     }
-    if (card) {
-      const id = card.dataset.graphScene;
-      if (this.pending) {
-        this.api.connect(this.pending.sceneId, this.pending.path, id);
-        this.pending = null;
-        return;
-      }
-      if (e.shiftKey || e.ctrlKey || e.metaKey) {
-        this.selected.has(id)
-          ? this.selected.delete(id)
-          : this.selected.add(id);
-        if (!this.selected.size) this.selected.add(id);
-      } else this.selected = new Set([id]);
-      this.api.select(id);
-    }
+    if (card)
+      return this.choose(
+        card.dataset.graphScene,
+        e.shiftKey || e.ctrlKey || e.metaKey,
+      );
+    this.selected.clear();
+    this.activeEdge = null;
+    this.highlight();
+    this.api.blank?.();
   }
   portDrag(e, port) {
-    const start = { x: e.clientX, y: e.clientY },
-      from = port.dataset.from,
-      path = port.dataset.port,
-      ctrl = new AbortController();
+    if (port.dataset.fixed) return;
+    this.cancelDrag?.();
+    const from = port.dataset.from || port.dataset.lineFrom,
+      path = port.dataset.port || port.dataset.linePath,
+      ps = this.ports(this.nodes.find((n) => n.id === from));
+    if (ps.find((p) => p.path === path)?.fixed) return;
+    e.preventDefault();
+    const initial = { x: e.clientX, y: e.clientY },
+      f = this.positions[from],
+      start = { x: f.x + W, y: f.y + 80 },
+      line = svgEl("path");
+    line.classList.add("flow-preview");
+    this.svg.append(line);
     let moved = false;
-    const svg = this.host.querySelector(".graph-lines"),
-      line = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    line.style.cssText =
-      "stroke:#8470ef;stroke-dasharray:5 4;pointer-events:none";
-    svg.append(line);
+    const ctrl = new AbortController();
+    const cleanup = () => {
+      ctrl.abort();
+      line.remove();
+      this.cancelDrag = null;
+    };
+    this.cancelDrag = cleanup;
     window.addEventListener(
       "pointermove",
       (ev) => {
-        moved =
-          Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 5;
-        const r = svg.getBoundingClientRect(),
-          x1 = (start.x - r.left) / this.scale,
-          y1 = (start.y - r.top) / this.scale,
-          x2 = (ev.clientX - r.left) / this.scale,
-          y2 = (ev.clientY - r.top) / this.scale;
+        moved = Math.hypot(ev.clientX - initial.x, ev.clientY - initial.y) > 4;
+        const end = this.point(ev),
+          mid = (start.x + end.x) / 2;
         line.setAttribute(
           "d",
-          "M" +
-            x1 +
-            "," +
-            y1 +
-            " C" +
-            (x1 + 80) +
-            "," +
-            y1 +
-            " " +
-            (x2 - 80) +
-            "," +
-            y2 +
-            " " +
-            x2 +
-            "," +
-            y2,
+          pathData([start, { x: mid, y: start.y }, { x: mid, y: end.y }, end]),
         );
       },
       { signal: ctrl.signal },
     );
-    const finish = (ev) => {
-      ctrl.abort();
-      line.remove();
-      if (!moved) return;
-      this.moved = true;
-      if (ev.type === "pointercancel") return;
-      const target = document
-        .elementFromPoint(ev.clientX, ev.clientY)
-        ?.closest("[data-graph-scene]");
-      if (target) this.api.connect(from, path, target.dataset.graphScene);
-    };
-    window.addEventListener("pointerup", finish, {
-      once: true,
-      signal: ctrl.signal,
-    });
-    window.addEventListener("pointercancel", finish, {
+    window.addEventListener(
+      "pointerup",
+      (ev) => {
+        cleanup();
+        if (!moved) return;
+        this.moved = true;
+        const target = document
+          .elementFromPoint(ev.clientX, ev.clientY)
+          ?.closest("[data-graph-scene]");
+        if (target) this.api.connect(from, path, target.dataset.graphScene);
+        else {
+          const r = this.host.getBoundingClientRect();
+          if (
+            ev.clientX >= r.left &&
+            ev.clientX <= r.right &&
+            ev.clientY >= r.top &&
+            ev.clientY <= r.bottom
+          )
+            this.api.create(this.point(ev), { from, path });
+        }
+      },
+      { once: true, signal: ctrl.signal },
+    );
+    window.addEventListener("pointercancel", cleanup, {
       once: true,
       signal: ctrl.signal,
     });
   }
   pointer(e) {
-    const port = e.target.closest("[data-port]");
-    if (port && e.button === 0) {
-      this.portDrag(e, port);
+    const port = e.target.closest("[data-port],[data-reconnect]");
+    if (port && e.button === 0) return this.portDrag(e, port);
+    if (
+      (e.button !== 0 && e.button !== 1) ||
+      e.target.closest("button,[data-line-from]")
+    )
       return;
-    }
-    if (e.button !== 0 || e.target.closest("button,[data-line-from]")) return;
     const card = e.target.closest("[data-graph-scene]"),
-      x = e.clientX,
-      y = e.clientY,
-      scrollX = this.host.scrollLeft,
-      scrollY = this.host.scrollTop,
-      base = new Map(),
-      mode = card
-        ? "move"
-        : e.shiftKey || this.mode === "select"
-          ? "select"
-          : "pan";
-    if (card) {
-      const id = card.dataset.graphScene;
-      if (!this.selected.has(id)) this.selected = new Set([id]);
-      for (const sid of this.selected)
-        base.set(sid, { ...this.project.editor.positions[sid] });
-    }
+      start = { x: e.clientX, y: e.clientY },
+      scroll = { x: this.host.scrollLeft, y: this.host.scrollTop },
+      mode =
+        this.spaceHeld || e.button === 1
+          ? "pan"
+          : card
+            ? "move"
+            : e.shiftKey || this.mode === "select"
+              ? "select"
+              : "pan";
+    e.preventDefault();
+    this.cancelDrag?.();
+    const ctrl = new AbortController(),
+      base = {};
     let dx = 0,
       dy = 0,
-      box;
-    const ctrl = new AbortController();
+      box,
+      raf;
+    if (mode === "move") {
+      const id = card.dataset.graphScene;
+      if (!this.selected.has(id) && !e.shiftKey && !e.ctrlKey && !e.metaKey)
+        this.selected = new Set([id]);
+      for (const id of new Set([...this.selected, card.dataset.graphScene]))
+        base[id] = { ...this.positions[id] };
+    }
     if (mode === "select") {
       box = document.createElement("div");
       box.className = "selection-box";
       this.host.append(box);
     }
+    const cleanup = () => {
+      ctrl.abort();
+      box?.remove();
+      this.guides.innerHTML = "";
+      cancelAnimationFrame(raf);
+      this.cancelDrag = null;
+    };
+    this.cancelDrag = () => {
+      cleanup();
+      for (const [id, p] of Object.entries(base)) this.positions[id] = p;
+      this.positionCards();
+      this.lines();
+    };
     window.addEventListener(
       "pointermove",
       (ev) => {
-        dx = ev.clientX - x;
-        dy = ev.clientY - y;
+        dx = ev.clientX - start.x;
+        dy = ev.clientY - start.y;
         if (mode === "pan") {
-          this.host.scrollLeft = scrollX - dx;
-          this.host.scrollTop = scrollY - dy;
-        } else if (mode === "move")
-          for (const [id, p] of base) {
-            const el = this.host.querySelector(`[data-graph-scene="${id}"]`);
-            el.style.left = Math.max(0, p.x + dx / this.scale) + "px";
-            el.style.top = Math.max(0, p.y + dy / this.scale) + "px";
-          }
-        else {
-          const r = this.host.getBoundingClientRect();
-          box.style.cssText = `left:${Math.min(x, ev.clientX) - r.left + scrollX}px;top:${Math.min(y, ev.clientY) - r.top + scrollY}px;width:${Math.abs(dx)}px;height:${Math.abs(dy)}px`;
+          this.host.scrollLeft = scroll.x - dx;
+          this.host.scrollTop = scroll.y - dy;
+          return;
         }
+        if (mode === "select") {
+          const r = this.host.getBoundingClientRect();
+          box.style.cssText = `left:${Math.min(start.x, ev.clientX) - r.left + scroll.x}px;top:${Math.min(start.y, ev.clientY) - r.top + scroll.y}px;width:${Math.abs(dx)}px;height:${Math.abs(dy)}px`;
+          return;
+        }
+        let mx = dx / this.scale,
+          my = dy / this.scale;
+        this.guides.innerHTML = "";
+        const lead = Object.values(base)[0];
+        if (!lead) return;
+        if (!ev.altKey) {
+          let sx = null,
+            sy = null;
+          for (const n of this.nodes) {
+            if (base[n.id]) continue;
+            const p = this.positions[n.id];
+            if (Math.abs(p.x - lead.x - mx) < 7 / this.scale) sx = p.x - lead.x;
+            if (Math.abs(p.y - lead.y - my) < 7 / this.scale) sy = p.y - lead.y;
+          }
+          if (sx !== null) {
+            mx = sx;
+            this.guides.innerHTML += `<i style="left:${lead.x + mx}px;top:0;height:${this.size.height}px;width:1px"></i>`;
+          }
+          if (sy !== null) {
+            my = sy;
+            this.guides.innerHTML += `<i style="top:${lead.y + my}px;left:0;width:${this.size.width}px;height:1px"></i>`;
+          }
+        }
+        mx = Math.max(
+          mx,
+          20 - Math.min(...Object.values(base).map((p) => p.x)),
+        );
+        my = Math.max(
+          my,
+          20 - Math.min(...Object.values(base).map((p) => p.y)),
+        );
+        for (const [id, p] of Object.entries(base)) {
+          this.positions[id] = {
+            x: Math.round(p.x + mx),
+            y: Math.round(p.y + my),
+          };
+          const el = this.cards.get(id);
+          el.style.left = this.positions[id].x + "px";
+          el.style.top = this.positions[id].y + "px";
+        }
+        if (!raf)
+          raf = requestAnimationFrame(() => {
+            raf = null;
+            this.lines();
+          });
       },
       { signal: ctrl.signal },
     );
-    const finish = (ev) => {
-      ctrl.abort();
-      box?.remove();
-      if (ev.type === "pointercancel") {
-        this.render(this.project, [...this.selected][0]);
-        return;
-      }
-      if (Math.abs(dx) + Math.abs(dy) < 4) return;
-      this.moved = true;
-      if (mode === "move")
-        this.api.move(
-          [...base].map(([id, p]) => ({
-            id,
-            x: Math.round(Math.max(0, p.x + dx / this.scale)),
-            y: Math.round(Math.max(0, p.y + dy / this.scale)),
-          })),
-        );
-      if (mode === "select") {
-        const rect = {
-          left: Math.min(x, x + dx),
-          right: Math.max(x, x + dx),
-          top: Math.min(y, y + dy),
-          bottom: Math.max(y, y + dy),
-        };
-        this.selected = new Set(
-          [...this.host.querySelectorAll("[data-graph-scene]")]
-            .filter((el) => {
-              const r = el.getBoundingClientRect();
-              return (
-                r.left < rect.right &&
-                r.right > rect.left &&
-                r.top < rect.bottom &&
-                r.bottom > rect.top
-              );
-            })
-            .map((el) => el.dataset.graphScene),
-        );
-        if (this.selected.size) this.api.select([...this.selected][0]);
-      }
-    };
-    window.addEventListener("pointerup", finish, {
-      once: true,
-      signal: ctrl.signal,
-    });
-    window.addEventListener("pointercancel", finish, {
+    window.addEventListener(
+      "pointerup",
+      (ev) => {
+        cleanup();
+        if (Math.hypot(dx, dy) < 4) return;
+        this.moved = true;
+        if (mode === "move") {
+          this.api.move(
+            Object.keys(base).map((id) => ({ id, ...this.positions[id] })),
+          );
+          this.measure();
+          this.lines();
+        }
+        if (mode === "select") {
+          const r = {
+            left: Math.min(start.x, ev.clientX),
+            right: Math.max(start.x, ev.clientX),
+            top: Math.min(start.y, ev.clientY),
+            bottom: Math.max(start.y, ev.clientY),
+          };
+          this.selected = new Set(
+            [...this.cards]
+              .filter(([, el]) => {
+                const b = el.getBoundingClientRect();
+                return (
+                  b.left < r.right &&
+                  b.right > r.left &&
+                  b.top < r.bottom &&
+                  b.bottom > r.top
+                );
+              })
+              .map(([id]) => id),
+          );
+          if (this.selected.size) this.api.select([...this.selected][0]);
+          this.highlight();
+        }
+      },
+      { once: true, signal: ctrl.signal },
+    );
+    window.addEventListener("pointercancel", () => this.cancelDrag?.(), {
       once: true,
       signal: ctrl.signal,
     });

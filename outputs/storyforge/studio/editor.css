@@ -1323,3 +1323,147 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
     max-width: 95%;
   }
 }
+/* Stable, compact story flow. Ports are expanded only on selected cards. */
+.graph-card {
+  width: 240px;
+  padding: 0 12px 7px;
+  transition: none !important;
+}
+.graph-card .node-thumb {
+  height: 76px;
+}
+.graph-card .node-meta {
+  height: 37px;
+}
+.graph-card .node-title {
+  height: 43px;
+}
+.graph-card .node-ports {
+  display: none;
+}
+.graph-card.selected .node-ports {
+  display: block;
+}
+.graph-card .node-port {
+  height: 28px;
+  margin: 2px 0 0;
+}
+.graph-card .node-port i {
+  right: -18px;
+}
+.node-input {
+  position: absolute;
+  left: -5px;
+  top: 35px;
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  border: 2px solid #b6acd9;
+  border-radius: 50%;
+}
+.node-icon.loading,
+.node-icon.splash {
+  background: #e8f0ff;
+  color: #547bbc;
+}
+.node-icon.death {
+  background: #fff0e9;
+  color: #b67e54;
+}
+.graph-board.overview .node-thumb,
+.graph-board.overview .node-meta,
+.graph-board.overview .node-ports {
+  display: none !important;
+}
+.graph-board.overview .node-title {
+  height: 80px;
+}
+.graph-board.overview .node-title h3 {
+  font-size: 21px;
+}
+.graph-board.overview .node-title .node-menu {
+  display: none;
+}
+.graph-lines .flow-hit {
+  stroke: transparent;
+  stroke-width: 15;
+  fill: none;
+  pointer-events: stroke;
+}
+.graph-lines .flow-line {
+  stroke: #aaa2ba;
+  stroke-width: 1.7;
+  fill: none;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.graph-lines g.dim {
+  opacity: 0.2;
+}
+.graph-lines g.related .flow-line,
+.graph-lines g.active .flow-line {
+  stroke: #806bca;
+  stroke-width: 2.2;
+}
+.graph-lines g.return-line .flow-line {
+  stroke-dasharray: 5 5;
+}
+.flow-label {
+  fill: #706286;
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: #fafaff;
+  stroke-width: 4px;
+  pointer-events: none;
+}
+.graph-lines .flow-handle {
+  fill: white;
+  stroke: #7761cc;
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: crosshair;
+}
+.graph-lines .flow-preview {
+  stroke: #816bd6;
+  stroke-dasharray: 5 5;
+  fill: none;
+  pointer-events: none;
+}
+.graph-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.graph-guides i {
+  position: absolute;
+  background: #8f73df;
+  opacity: 0.6;
+}
+.graph-scroll {
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.graph-scroll.panning,
+.graph-scroll.panning * {
+  cursor: grabbing !important;
+}
+.graph-toptools {
+  max-width: none;
+}
+.node-thumb video,
+.node-thumb img {
+  pointer-events: none;
+}
+.graph-scroll {
+  top: 64px;
+  height: calc(100% - 64px);
+}
+.flow-loose-label {
+  position: absolute;
+  color: #9091a5;
+  font-size: 14px;
+  pointer-events: none;
+}
+.graph-board.overview .flow-label {
+  display: none;
+}

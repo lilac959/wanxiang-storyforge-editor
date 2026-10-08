@@ -494,6 +494,10 @@ export class PlayerView {
     this.root.querySelector(".play-status").textContent = text;
   }
   update(event, runtime) {
+    if (event.type === "home") {
+      this.onExit();
+      return;
+    }
     if (event.type === "scene") {
       this.mount(runtime.scene, runtime.timeMs);
       this.preloadNext(runtime.scene);
