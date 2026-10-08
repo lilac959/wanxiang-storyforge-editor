@@ -534,6 +534,29 @@ export function validate(p, { publish = false } = {}) {
     !str(p.splash.subtitle)
   )
     error("开场设置无效");
+  for (const config of [p.loading, p.splash]) {
+    if (config.startText !== undefined && !str(config.startText))
+      error("开始提示无效");
+    if (
+      config.layout !== undefined &&
+      (!config.layout ||
+        typeof config.layout !== "object" ||
+        Array.isArray(config.layout))
+    )
+      error("开场布局无效");
+    for (const [key, style] of Object.entries(config.layout || {})) {
+      if (
+        !["title", "subtitle", "progress", "start"].includes(key) ||
+        !style ||
+        !finite(style.x, 0, 100) ||
+        !finite(style.y, 0, 100) ||
+        !finite(style.size, 1, 300) ||
+        !finite(style.width, 0, 100) ||
+        !/^#[a-f0-9]{6}$/i.test(style.color)
+      )
+        error("开场元素位置或样式无效");
+    }
+  }
   if (p.loading.image) ref(p.loading.image, null, "image");
   if (p.loading.video) ref(p.loading.video, null, "video");
   if (p.splash.video) ref(p.splash.video, null, "video");

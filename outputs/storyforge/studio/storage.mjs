@@ -361,7 +361,7 @@ export async function exportZip(project, assets) {
     {
       name: "使用说明.txt",
       blob: new Blob([
-        "在叙境编辑器选择“导入项目”，导入整个 ZIP。素材保持原始字节；无需解压。",
+        "在故事引擎 TaleSpark编辑器选择“导入项目”，导入整个 ZIP。素材保持原始字节；无需解压。",
       ]),
     },
   );

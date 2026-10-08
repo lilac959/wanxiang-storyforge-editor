@@ -138,7 +138,8 @@ export function demoProject() {
         y: 60 + (i === 2 || i === 4 ? 280 : 0),
       }),
   );
-  p.loading.title = "叙境";
+  p.loading.title = "故事引擎";
+  p.loading.titleLayout = "normal";
   p.splash.title = p.name;
   p.splash.subtitle = "在完整视频里，安排属于你的互动。";
   return p;

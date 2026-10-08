@@ -55,6 +55,10 @@ let storage = new Storage(assets, status),
   board,
   sceneViews = new Map(),
   sceneSearch = "",
+  directoryOpen = localStorage.getItem("talespark-directory") === "true",
+  inspectorOpen = true,
+  openingPart = "background",
+  openingSession,
   assetSearch = "",
   pendingDelete = [],
   connectionEdit = null,
@@ -236,7 +240,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><button class="brand" data-action="projects" title="作品管理"><b>叙</b>叙境</button><span class="top-divider"></span><input class="project-name" aria-label="作品名称" data-field="name" data-scope="project"><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><details class="more-menu"><summary aria-label="更多操作">···</summary><div><button data-action="save">保存草稿</button><button data-action="connect">连接云端</button><button data-action="import">导入作品</button><button data-action="export">导出备份</button><button data-action="versions">发布版本</button><button data-action="check-project">检查作品</button><button data-action="help">快捷操作</button></div></details><button data-action="preview-all">▷ 试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="loading" title="加载页面"><b>◌</b>加载</button><button data-page="splash" title="开屏动画"><b>◈</b>开屏</button><button data-page="theme" title="作品样式"><b>◐</b>样式</button><button data-page="variables" title="剧情记录"><b>◇</b>变量</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">▣</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="fit-graph" id="graph-scale" title="适应全部场景">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="arrange-graph" title="自动整理">整理</button><button data-action="locate-entry" title="定位入口">入口</button></div><div class="minimap" title="点击定位场景"></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><button class="brand" data-action="projects" title="作品管理"><b>T</b>故事引擎 TaleSpark</button><span class="top-divider"></span><input class="project-name" aria-label="作品名称" data-field="name" data-scope="project"><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><details class="more-menu"><summary aria-label="更多操作">···</summary><div><button data-action="save">保存草稿</button><button data-action="connect">连接云端</button><button data-action="import">导入作品</button><button data-action="export">导出备份</button><button data-action="versions">发布版本</button><button data-action="check-project">检查作品</button><button data-action="help">快捷操作</button></div></details><button data-action="preview-all">▷ 试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="loading" title="加载页面"><b>◌</b>加载</button><button data-page="splash" title="开屏动画"><b>◈</b>开屏</button><button data-page="theme" title="作品样式"><b>◐</b>样式</button><button data-page="variables" title="剧情记录"><b>◇</b>变量</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">▣</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">☰ 目录</button><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="opening-nodes"><button class="opening-node" data-opening-node="loading">◌ 加载</button><span>→</span><button class="opening-node" data-opening-node="splash">◈ 开屏</button><span>→</span><button data-action="locate-entry">剧情入口 ↗</button></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="fit-graph" id="graph-scale" title="适应全部场景">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="arrange-graph" title="自动整理">整理</button><button data-action="locate-entry" title="定位入口">入口</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
@@ -296,15 +300,26 @@ function render() {
   if (!selectObject()) selection = { kind: "scene" };
   time = clamp(time, 0, duration(s()));
   $(".project-name").value = p().name;
-  document.title = `${p().name} · 叙境`;
+  document.title = `${p().name} · 故事引擎 TaleSpark`;
   $('[data-action="undo"]').disabled = !history.past.length;
   $('[data-action="redo"]').disabled = !history.future.length;
   document
     .querySelectorAll("[data-page]")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  const isOpening = page === "loading" || page === "splash";
+  document.body.dataset.directory = String(directoryOpen);
+  document.body.dataset.inspector = String(inspectorOpen);
+  $(".opening-work").hidden = !isOpening;
+  if (!isOpening) openingSession?.dispose();
   renderLibrary();
   document.body.dataset.view =
-    page === "story" ? (graph ? "graph" : "scene") : "settings";
+    page === "story"
+      ? graph
+        ? "graph"
+        : "scene"
+      : isOpening
+        ? "opening"
+        : "settings";
   $(".workspace-head h1").textContent =
     page === "story"
       ? graph
@@ -319,11 +334,11 @@ function render() {
         }[page];
   if (page === "story" && graph) still.pauseMedia();
   $(".graph-area").hidden = page !== "story" || !graph;
-  $('[data-action="graph-view"]').hidden = page !== "story" || graph;
+  $('[data-action="graph-view"]').hidden = page === "story" && graph;
   $('[data-action="canvas-view"]').hidden = page !== "story" || !graph;
   $(".story-work").hidden = page !== "story" || graph;
   $(".graph-scroll").hidden = page !== "story" || !graph;
-  $(".settings-page").hidden = page === "story";
+  $(".settings-page").hidden = page === "story" || isOpening;
   $('[data-action="preview-current"]').textContent =
     page === "story" ? "▷ 试玩场景" : "▷ 预览";
   $('[data-action="canvas-view"]').classList.toggle("active", !graph);
@@ -334,7 +349,8 @@ function render() {
       renderTimeline();
       paintStill();
     }
-  } else renderSettings();
+  } else if (isOpening) renderOpening();
+  else renderSettings();
   renderInspector();
 }
 function paintStill() {
@@ -471,6 +487,10 @@ function updatePlayhead() {
   $(".time-label").textContent = sec(time).toFixed(1) + "s";
 }
 function renderInspector() {
+  if (page === "loading" || page === "splash") {
+    renderOpeningInspector();
+    return;
+  }
   let html = "<h2>属性设置</h2>",
     obj = selectObject(),
     scene = s();
@@ -1771,6 +1791,28 @@ document.addEventListener("click", async (e) => {
   }
   const button = e.target.closest("button");
   try {
+    const part = e.target.closest("[data-opening-part]");
+    if (part) {
+      openingPart = part.dataset.openingPart;
+      renderLibrary();
+      renderOpeningInspector();
+      return;
+    }
+    if (button?.dataset.action === "toggle-directory") {
+      directoryOpen = !directoryOpen;
+      localStorage.setItem("talespark-directory", String(directoryOpen));
+      document.body.dataset.directory = String(directoryOpen);
+      if (directoryOpen) $("#scene-search")?.focus();
+      return;
+    }
+    if (button?.dataset.action === "opening-play") {
+      const v = $(".opening-preview video");
+      if (v) {
+        if (v.paused) v.play().catch((x) => notify(x.message));
+        else v.pause();
+      }
+      return;
+    }
     const device = e.target.closest("[data-preview-device]");
     if (device) {
       $("#preview").dataset.device = device.dataset.previewDevice;
@@ -1785,6 +1827,7 @@ document.addEventListener("click", async (e) => {
     if (button?.dataset.page) {
       if (page === "story" && !graph) rememberScene();
       page = button.dataset.page;
+      openingPart = "background";
       if (page === "story") graph = true;
       render();
       return;
@@ -1852,6 +1895,13 @@ document.addEventListener("change", (e) => {
       if (selection.kind === "clip" && path === "startMs") {
         moveClip(s(), obj.id, value);
         return;
+      }
+      if (
+        (scope === "loading" || scope === "splash") &&
+        path.startsWith("layout.")
+      ) {
+        obj.layout ||= {};
+        obj.layout[openingPart] ||= openingDefaults(openingPart);
       }
       set(obj, path, value);
       if (path.endsWith(".target.kind") || path === "next.kind") {
@@ -1987,6 +2037,38 @@ function enterScene(id) {
   $("#zoom").value = zoom;
 }
 function setupBoard() {
+  $(".opening-nodes").addEventListener("dblclick", (e) => {
+    const node = e.target.closest("[data-opening-node]");
+    if (node) {
+      page = node.dataset.openingNode;
+      openingPart = "background";
+      render();
+    }
+  });
+  $(".opening-nodes").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const node = e.target.closest("[data-opening-node]");
+      if (node) {
+        page = node.dataset.openingNode;
+        openingPart = "background";
+        render();
+      }
+    }
+  });
+  $(".graph-scroll").addEventListener("click", (e) => {
+    if (!e.target.closest(".graph-card,[data-line-from]")) {
+      inspectorOpen = false;
+      document.body.dataset.inspector = "false";
+    }
+  });
+  $(".opening-preview").addEventListener("pointerdown", openingPointer);
+  $("#opening-seek").addEventListener("input", (e) => {
+    const v = $(".opening-preview video");
+    if (v && Number.isFinite(v.duration)) {
+      v.pause();
+      v.currentTime = Number(e.target.value);
+    }
+  });
   board = new StoryBoard($(".graph-scroll"), {
     ports,
     assetUrl: (a) => assets.url(a),
@@ -1994,6 +2076,8 @@ function setupBoard() {
     zoom: (n) => ($("#graph-scale").textContent = Math.round(n * 100) + "%"),
     selection: (n) => ($(".selection-tools").hidden = !n),
     select: (id) => {
+      inspectorOpen = true;
+      document.body.dataset.inspector = "true";
       selected = id;
       selection = { kind: "scene" };
       renderInspector();
@@ -2077,6 +2161,26 @@ function setupBoard() {
   });
 }
 function renderLibrary() {
+  if (page === "loading" || page === "splash") {
+    const parts = {
+      background: "背景",
+      title: "标题",
+      subtitle: "副标题",
+      ...(page === "loading"
+        ? { progress: "加载进度" }
+        : { start: "开始提示" }),
+    };
+    $(".library").innerHTML =
+      `<div class="sidebar-title">画面元素</div>${Object.entries(parts)
+        .map(
+          ([key, label]) =>
+            `<button class="opening-layer ${openingPart === key ? "active" : ""}" data-opening-part="${key}">${label}</button>`,
+        )
+        .join(
+          "",
+        )}<hr><button data-action="upload-opening">＋ 上传素材</button>`;
+    return;
+  }
   if (page === "story" && !graph) {
     $(".library").innerHTML =
       `<div class="sidebar-title">素材<button data-action="upload-library" title="导入素材">＋</button></div><input id="asset-search" placeholder="搜索素材" value="${esc(assetSearch)}"><div class="asset-grid">${Object.values(
@@ -2527,4 +2631,209 @@ async function workspaceAction(action, button = { dataset: {} }) {
       return false;
   }
   return true;
+}
+
+async function renderOpening() {
+  still.pauseMedia();
+  openingSession?.dispose();
+  const session = (openingSession = new Session($(".opening-preview"), assets, {
+    editor: true,
+  }));
+  try {
+    if (page === "loading") await session.open(p(), { design: true });
+    else {
+      session.project = clone(p());
+      await session.home(true);
+    }
+    if (openingSession !== session) return;
+    const v = $(".opening-preview video");
+    if (v) {
+      v.pause();
+      v.muted = true;
+      const update = () => {
+        $("#opening-seek").max = Number.isFinite(v.duration) ? v.duration : 100;
+        $("#opening-seek").value = v.currentTime;
+        $(".opening-time").textContent = v.currentTime.toFixed(1) + "s";
+        $('[data-action="opening-play"]').textContent = v.paused
+          ? "▷ 播放"
+          : "Ⅱ 暂停";
+      };
+      ["loadedmetadata", "timeupdate", "play", "pause"].forEach((name) =>
+        v.addEventListener(name, update),
+      );
+      update();
+    }
+    $(".opening-transport").hidden = !v;
+    $(".opening-preview .load-progress small")?.setAttribute("hidden", "");
+    // A sample only; actual loading always follows real resource readiness.
+    const progress = $(".opening-preview progress");
+    if (progress) progress.value = 45;
+  } catch (e) {
+    notify(e.message);
+  }
+}
+function renderOpeningInspector() {
+  const c = p()[page],
+    scope = page;
+  const assetOptions = (kind) => ({
+    "": "无",
+    ...Object.fromEntries(
+      Object.values(p().assets)
+        .filter((a) => a.kind === kind)
+        .map((a) => [a.id, a.name]),
+    ),
+  });
+  let html = "";
+  if (openingPart === "background") {
+    html =
+      "<h2>背景</h2>" +
+      field("视频", "video", c.video || "", {
+        scope,
+        options: assetOptions("video"),
+      });
+    if (page === "loading")
+      html +=
+        field("图片", "image", c.image || "", {
+          scope,
+          options: assetOptions("image"),
+        }) +
+        field("最少展示秒数", "minimumMs", c.minimumMs, {
+          scope,
+          type: "number",
+          millis: true,
+          min: 0,
+          max: 30,
+          step: 0.1,
+        });
+    if (page === "splash")
+      html += field("文字入场效果", "effect", c.effect, {
+        scope,
+        options: { fade: "淡入", zoom: "缓慢放大", none: "直接显示" },
+      });
+  } else {
+    const names = {
+      title: "标题",
+      subtitle: "副标题",
+      progress: "加载进度",
+      start: "开始提示",
+    };
+    html = "<h2>" + names[openingPart] + "</h2>";
+    const key = {
+      title: "title",
+      subtitle: "subtitle",
+      progress: "text",
+      start: "startText",
+    }[openingPart];
+    html += field("文字", key, c[key] ?? "点击或按任意键开始", { scope });
+    if (openingPart === "progress")
+      html += field("进度颜色", "color", c.color, { scope, type: "color" });
+    if (openingPart === "title" && page === "loading")
+      html += field("排布", "titleLayout", c.titleLayout, {
+        scope,
+        options: { square: "方形", normal: "单行" },
+      });
+    const layout = c.layout?.[openingPart] || openingDefaults(openingPart);
+    for (const [key, label, min, max] of [
+      ["x", "横向位置 %", 0, 100],
+      ["y", "纵向位置 %", 0, 100],
+      ["size", "字号", 10, 160],
+      ["width", "宽度 %", 5, 100],
+    ])
+      html += field(label, "layout." + openingPart + "." + key, layout[key], {
+        scope,
+        type: "number",
+        min,
+        max,
+      });
+    html += field(
+      "文字颜色",
+      "layout." + openingPart + ".color",
+      layout.color,
+      { scope, type: "color" },
+    );
+  }
+  $(".inspector").innerHTML = html;
+}
+function openingDefaults(kind) {
+  const el = $('.opening-preview [data-opening-element="' + kind + '"]'),
+    frame = $(".opening-preview .opening-frame");
+  if (el && frame) {
+    const a = el.getBoundingClientRect(),
+      b = frame.getBoundingClientRect();
+    return {
+      x: +(((a.x + a.width / 2 - b.x) / b.width) * 100).toFixed(1),
+      y: +(((a.y + a.height / 2 - b.y) / b.height) * 100).toFixed(1),
+      size: Math.round(
+        (parseFloat(getComputedStyle(el).fontSize) / b.width) * 1920,
+      ),
+      width: +((a.width / b.width) * 100).toFixed(1),
+      color: "#e5d6b1",
+    };
+  }
+  return {
+    x: 50,
+    y: kind === "progress" || kind === "start" ? 82 : 40,
+    size: kind === "title" ? 90 : 32,
+    width: kind === "progress" ? 30 : 70,
+    color: "#e5d6b1",
+  };
+}
+function openingPointer(e) {
+  if (e.button !== 0) return;
+  const el = e.target.closest("[data-opening-element]");
+  if (!el) {
+    openingPart = "background";
+    renderLibrary();
+    renderOpeningInspector();
+    return;
+  }
+  e.preventDefault();
+  openingPart = el.dataset.openingElement;
+  renderLibrary();
+  renderOpeningInspector();
+  const defaults = openingDefaults(openingPart),
+    kind = openingPart,
+    scope = page,
+    frame = $(".opening-preview .opening-frame"),
+    rect = frame.getBoundingClientRect(),
+    start = { x: e.clientX, y: e.clientY };
+  const controller = new AbortController();
+  let dx = 0,
+    dy = 0;
+  window.addEventListener(
+    "pointermove",
+    (ev) => {
+      dx = ((ev.clientX - start.x) / rect.width) * 100;
+      dy = ((ev.clientY - start.y) / rect.height) * 100;
+      el.style.translate =
+        ev.clientX - start.x + "px " + (ev.clientY - start.y) + "px";
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    "pointerup",
+    () => {
+      controller.abort();
+      el.style.translate = "";
+      if (Math.abs(dx) + Math.abs(dy) > 0.2)
+        mutate("调整开场元素", () => {
+          p()[scope].layout ||= {};
+          p()[scope].layout[kind] = {
+            ...defaults,
+            ...p()[scope].layout[kind],
+            x: +clamp(defaults.x + dx, 0, 100).toFixed(1),
+            y: +clamp(defaults.y + dy, 0, 100).toFixed(1),
+          };
+        });
+    },
+    { once: true, signal: controller.signal },
+  );
+  window.addEventListener(
+    "pointercancel",
+    () => {
+      controller.abort();
+      el.style.translate = "";
+    },
+    { once: true, signal: controller.signal },
+  );
 }

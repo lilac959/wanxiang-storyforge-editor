@@ -55,7 +55,10 @@ export class Session {
     media?.addEventListener("load", fit, { once: true });
     fit();
   }
-  async open(project, { sceneId = null, time = 0, only = null } = {}) {
+  async open(
+    project,
+    { sceneId = null, time = 0, only = null, design = false } = {},
+  ) {
     this.clear();
     this.project = structuredClone(project);
     const p = this.project,
@@ -90,6 +93,8 @@ export class Session {
         this.root.querySelector(".opening-frame").prepend(el);
         this.fitOpening(el);
       }
+      this.applyOpeningLayout(p.loading);
+      if (design) return;
       const entry = p.scenes.find((s) => s.id === p.entryId);
       const ids = [
         ...new Set(
@@ -139,7 +144,7 @@ export class Session {
       }
     }
   }
-  async home() {
+  async home(design = false) {
     this.clear();
     const token = this.token,
       p = this.project,
@@ -166,6 +171,8 @@ export class Session {
           error.message;
       }
     }
+    this.applyOpeningLayout(c);
+    if (design) return;
     const start = () => {
       if (token !== this.token) return;
       qteAudio.unlock();
@@ -192,6 +199,40 @@ export class Session {
       start();
     };
     document.addEventListener("keydown", this.key, true);
+  }
+  applyOpeningLayout(c) {
+    const selectors = {
+      title: ".opening-content h1",
+      subtitle: ".opening-content p",
+      progress: ".load-progress",
+      start: ".opening-start",
+    };
+    const frame = this.root.querySelector(".opening-frame");
+    for (const [kind, selector] of Object.entries(selectors)) {
+      const el = frame?.querySelector(selector),
+        style = c.layout?.[kind];
+      if (!el) continue;
+      el.dataset.openingElement = kind;
+      if (!style) continue;
+      frame.append(el);
+      Object.assign(el.style, {
+        position: "absolute",
+        left: (style.x ?? 50) + "%",
+        top: (style.y ?? 50) + "%",
+        right: "auto",
+        bottom: "auto",
+        transform: "translate(-50%,-50%)",
+        margin: "0",
+        animation: "none",
+      });
+      if (style.size) el.style.fontSize = style.size / 19.2 + "cqw";
+      if (style.width) el.style.width = style.width + "%";
+      if (style.color) el.style.color = style.color;
+    }
+    if (c.startText !== undefined) {
+      const el = frame?.querySelector(".opening-start");
+      if (el) el.textContent = c.startText;
+    }
   }
   play(sceneId, time = 0) {
     this.clear();

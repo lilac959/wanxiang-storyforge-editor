@@ -159,3 +159,27 @@ test("delete entry requires replacement; undo restores cards and inbound edges",
   history.undo();
   assert.deepEqual(history.project, p);
 });
+
+test("opening layout survives migration and rejects invalid positions", () => {
+  const p = newProject("Opening layout");
+  p.loading.layout = {
+    title: { x: 23, y: 31, size: 96, width: 32, color: "#e5d6b1" },
+  };
+  p.splash.startText = "点击开始故事";
+  assert.deepEqual(migrate(p).loading.layout, p.loading.layout);
+  assert.equal(
+    validate(p).some((x) => x.message.includes("开场")),
+    false,
+  );
+  p.loading.layout.title.x = 101;
+  assert.equal(
+    validate(p).some((x) => x.message.includes("开场元素")),
+    true,
+  );
+  p.loading.layout.title.x = 23;
+  p.loading.layout.title.color = "invalid";
+  assert.equal(
+    validate(p).some((x) => x.message.includes("开场元素")),
+    true,
+  );
+});

@@ -1214,3 +1214,112 @@ body[data-view="settings"] .settings-page > h2:first-child {
   outline: 1px dashed #b0a3f2;
   outline-offset: 3px;
 }
+
+/* Canvas-first workspace. Directory is an explicit user preference. */
+body[data-view="graph"][data-directory="false"] .layout {
+  grid-template-columns: 66px minmax(360px, 1fr) 278px;
+}
+body[data-view="graph"][data-directory="false"] .library {
+  display: none;
+}
+body[data-view="graph"][data-inspector="false"] .inspector {
+  display: none;
+}
+body[data-view="graph"][data-directory="false"][data-inspector="false"]
+  .layout {
+  grid-template-columns: 66px minmax(360px, 1fr);
+}
+body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
+  grid-template-columns: 66px 204px minmax(360px, 1fr);
+}
+.opening-nodes {
+  position: absolute;
+  top: 17px;
+  right: 18px;
+  z-index: 5;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #ffffffeb;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 5px;
+}
+.opening-node {
+  border-color: #d7d0fa !important;
+  background: #faf9ff !important;
+  min-height: 38px;
+}
+.graph-toptools {
+  max-width: 48%;
+  flex-wrap: wrap;
+}
+.opening-work {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f6fa;
+  gap: 16px;
+}
+.opening-preview {
+  position: relative;
+  aspect-ratio: 16/9;
+  width: 100%;
+  max-height: 65dvh;
+  background: #080d10;
+  overflow: hidden;
+}
+.opening-preview .opening {
+  position: absolute;
+}
+.opening-transport {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.opening-transport input {
+  flex: 1;
+  min-width: 20px;
+}
+.opening-layer {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  text-align: left;
+}
+.opening-layer.active {
+  background: #eeeaff !important;
+  color: #7056db !important;
+}
+.opening-preview [data-opening-element] {
+  pointer-events: auto;
+  cursor: move;
+}
+.opening-preview [data-opening-element]:hover {
+  outline: 1px solid #a794ff;
+}
+.opening-preview .opening-content {
+  pointer-events: none;
+}
+.opening-preview .opening-content > * {
+  pointer-events: auto;
+}
+.brand {
+  white-space: nowrap;
+  font-size: 13px;
+}
+.brand b {
+  flex-shrink: 0;
+}
+@media (max-width: 1100px) {
+  .opening-nodes {
+    top: 65px;
+    right: 12px;
+  }
+  .graph-toptools {
+    max-width: 95%;
+  }
+}

@@ -30,33 +30,105 @@ export class PlayerView {
     this.last = performance.now();
     this.eventId = null;
     root.innerHTML =
-      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><div class="play-controls"><button data-player="pause">暂停</button><button data-player="restart">重新开始</button><button data-player="sound">声音开</button><span class="play-status"></span><button data-player="exit">返回开屏</button></div>';
+      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden><section class="play-controls" role="dialog" aria-modal="true" aria-label="播放设置"><header>设置<button data-player="close-settings" aria-label="关闭设置">×</button></header><div class="settings-options"><button data-player="pause">继续</button><button data-player="sound">声音开</button><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button><button data-player="fullscreen">全屏</button></div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" hidden></span></section></div>';
     this.stage = root.querySelector(".play-stage");
     this.visual = root.querySelector(".visual");
     this.hud = root.querySelector(".interaction");
     this.message = root.querySelector(".play-message");
-    if (editing) root.querySelector(".play-controls").hidden = true;
-    this.clickHandler = (e) => {
-      const command = e.target.closest("[data-player]")?.dataset.player;
-      if (command === "pause") {
-        if (this.runtime?.playing) this.runtime.pause();
-        else {
-          qteAudio.unlock();
-          this.runtime?.resume();
+    this.settingsButton = root.querySelector(".settings-toggle");
+    this.settingsButton.hidden = editing;
+    this.menu = root.querySelector(".settings-shade");
+    this.reveal = (e) => {
+      if (
+        editing ||
+        this.menuOpen ||
+        this.runtime?.active?.event.kind === "qte" ||
+        this.pointer ||
+        performance.now() < (this.interactionUntil || 0)
+      )
+        return;
+      if (e?.type === "pointermove" && e.pointerType !== "mouse") return;
+      if (e?.target.closest("button,.interaction,.play-controls")) return;
+      this.showSettingsButton();
+    };
+    root.addEventListener("pointermove", this.reveal);
+    root.addEventListener("click", this.reveal);
+    this.menuKey = (e) => {
+      if (editing) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.menuOpen ? this.closeSettings() : this.openSettings();
+      }
+      if (e.key === "Tab" && this.menuOpen) {
+        const buttons = [...this.menu.querySelectorAll("button")].filter(
+          (b) => !b.closest("[hidden]"),
+        );
+        const first = buttons[0],
+          last = buttons.at(-1);
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
         }
       }
-      if (command === "restart") this.start(this.project);
-      if (command === "sound") {
-        this.muted = !this.muted;
-        if (this.video) this.video.muted = this.muted;
-        for (const a of this.audio.values()) a.muted = this.muted;
-        e.target.textContent = this.muted ? "声音关" : "声音开";
-        if (this.muted) qteAudio.stop();
+    };
+    document.addEventListener("keydown", this.menuKey);
+    this.settingsButton.addEventListener("focus", () =>
+      this.showSettingsButton(),
+    );
+    if (!root.requestFullscreen)
+      root.querySelector('[data-player="fullscreen"]').hidden = true;
+    this.showSettingsButton();
+    this.clickHandler = (e) => {
+      const command = e.target.closest("[data-player]")?.dataset.player;
+      if (command) {
+        if (command === "settings") this.openSettings();
+        if (command === "close-settings" || command === "pause")
+          this.closeSettings(command === "pause");
+        if (command === "restart" || command === "exit") {
+          if (!this.menuOpen) this.openSettings();
+          this.confirmAction = command;
+          this.menu.querySelector(".settings-options").hidden = true;
+          this.menu.querySelector(".settings-confirm").hidden = false;
+          this.menu.querySelector(".settings-confirm p").textContent =
+            command === "restart"
+              ? "重新开始会清除本次进度，确定重新开始？"
+              : "返回开屏会结束本次游玩，确定返回？";
+          this.menu.querySelector('[data-player="cancel-action"]').focus();
+        }
+        if (command === "cancel-action") {
+          this.resetConfirmation();
+          this.menu.querySelector('[data-player="pause"]').focus();
+        }
+        if (command === "confirm-action") {
+          const action = this.confirmAction;
+          this.closeSettings(false, false);
+          if (action === "restart") this.start(this.project);
+          else if (action === "exit") {
+            this.stop();
+            this.onExit();
+          }
+        }
+        if (command === "sound") {
+          this.muted = !this.muted;
+          if (this.video) this.video.muted = this.muted;
+          for (const a of this.audio.values()) a.muted = this.muted;
+          e.target.textContent = this.muted ? "声音关" : "声音开";
+          if (this.muted) qteAudio.stop();
+        }
+        if (command === "fullscreen") {
+          const task = document.fullscreenElement
+            ? document.exitFullscreen()
+            : this.root.requestFullscreen();
+          task?.catch(() => {
+            e.target.textContent = "当前无法全屏";
+          });
+        }
+        return;
       }
-      if (command === "exit") {
-        this.stop();
-        this.onExit();
-      }
+      if (this.menuOpen) return;
       const choice = e.target.closest("[data-option-id]");
       if (choice && !this.editing)
         this.runtime?.resolve(true, choice.dataset.optionId);
@@ -126,11 +198,11 @@ export class PlayerView {
       if (this.runtime?.active) this.runtime.active.progress = 0;
     };
     this.visibility = () => {
-      if (document.hidden) this.runtime?.pause();
+      if (document.hidden && !this.editing) this.openSettings();
     };
     this.blur = () => {
       this.cancel();
-      this.runtime?.pause();
+      if (!this.editing) this.openSettings();
     };
     this.stage.addEventListener("pointerdown", this.down);
     this.stage.addEventListener("pointerup", this.up);
@@ -138,6 +210,45 @@ export class PlayerView {
     window.addEventListener("blur", this.blur);
     document.addEventListener("visibilitychange", this.visibility);
     this.frame = requestAnimationFrame((t) => this.loop(t));
+  }
+  showSettingsButton() {
+    if (this.editing) return;
+    this.root.classList.add("settings-visible");
+    clearTimeout(this.settingsTimer);
+    this.settingsTimer = setTimeout(() => {
+      if (!this.menuOpen && document.activeElement !== this.settingsButton)
+        this.root.classList.remove("settings-visible");
+    }, 3000);
+  }
+  resetConfirmation() {
+    this.confirmAction = null;
+    this.menu.querySelector(".settings-options").hidden = false;
+    this.menu.querySelector(".settings-confirm").hidden = true;
+  }
+  openSettings() {
+    if (this.editing || this.menuOpen || !this.runtime) return;
+    this.wasPlaying = this.runtime.playing;
+    this.menuOpen = true;
+    this.runtime.pause();
+    this.cancel();
+    this.menu.hidden = false;
+    this.resetConfirmation();
+    this.settingsButton.setAttribute("aria-expanded", "true");
+    this.stage.inert = true;
+    this.showSettingsButton();
+    this.menu.querySelector('[data-player="pause"]').textContent = "继续";
+    this.menu.querySelector('[data-player="pause"]').focus();
+  }
+  closeSettings(forceResume = false, restore = true) {
+    if (!this.menuOpen) return;
+    this.menuOpen = false;
+    this.menu.hidden = true;
+    this.stage.inert = false;
+    this.settingsButton.setAttribute("aria-expanded", "false");
+    if (restore && (this.wasPlaying || forceResume)) this.runtime?.resume();
+    this.settingsButton.focus();
+    this.settingsButton.blur();
+    this.showSettingsButton();
   }
   async start(project, sceneId = project.entryId, time = 0) {
     this.stop();
@@ -148,6 +259,7 @@ export class PlayerView {
     );
     await qteAudio.unlock();
     this.runtime.start(sceneId, time);
+    this.showSettingsButton();
   }
   stop() {
     this.token++;
@@ -184,6 +296,10 @@ export class PlayerView {
   dispose() {
     this.stop();
     this.disposed = true;
+    clearTimeout(this.settingsTimer);
+    this.root.removeEventListener("pointermove", this.reveal);
+    this.root.removeEventListener("click", this.reveal);
+    document.removeEventListener("keydown", this.menuKey);
     cancelAnimationFrame(this.frame);
     this.root.removeEventListener("click", this.clickHandler);
     this.stage.removeEventListener("pointerdown", this.down);
@@ -405,9 +521,11 @@ export class PlayerView {
     }
     if (event.type === "event") {
       this.pointer = null;
+      this.root.classList.remove("settings-visible");
       this.startSound(runtime.active.event);
     }
     if (event.type === "result") {
+      this.interactionUntil = performance.now() + 500;
       this.pointer = null;
       qteAudio.result(event.ok);
       const el = this.root.querySelector(".feedback");
