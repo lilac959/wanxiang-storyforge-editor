@@ -1,0 +1,642 @@
+import { Runtime } from "./runtime.mjs";
+import { duration, clamp, gestures } from "./model.mjs";
+import { esc } from "./storage.mjs";
+import { qteAudio } from "./audio.mjs";
+
+export class PlayerView {
+  constructor(
+    root,
+    assets,
+    {
+      onExit = () => {},
+      onChange = () => {},
+      editing = false,
+      onSelect = () => {},
+    } = {},
+  ) {
+    this.root = root;
+    this.assets = assets;
+    this.onExit = onExit;
+    this.onChange = onChange;
+    this.editing = editing;
+    this.onSelect = onSelect;
+    this.token = 0;
+    this.audio = new Map();
+    this.disposed = false;
+    this.muted = false;
+    this.pointer = null;
+    this.loading = false;
+    this.last = performance.now();
+    this.eventId = null;
+    root.innerHTML =
+      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><div class="play-controls"><button data-player="pause">暂停</button><button data-player="restart">重新开始</button><button data-player="sound">声音开</button><span class="play-status"></span><button data-player="exit">返回开屏</button></div>';
+    this.stage = root.querySelector(".play-stage");
+    this.visual = root.querySelector(".visual");
+    this.hud = root.querySelector(".interaction");
+    this.message = root.querySelector(".play-message");
+    if (editing) root.querySelector(".play-controls").hidden = true;
+    this.clickHandler = (e) => {
+      const command = e.target.closest("[data-player]")?.dataset.player;
+      if (command === "pause") {
+        if (this.runtime?.playing) this.runtime.pause();
+        else {
+          qteAudio.unlock();
+          this.runtime?.resume();
+        }
+      }
+      if (command === "restart") this.start(this.project);
+      if (command === "sound") {
+        this.muted = !this.muted;
+        if (this.video) this.video.muted = this.muted;
+        for (const a of this.audio.values()) a.muted = this.muted;
+        e.target.textContent = this.muted ? "声音关" : "声音开";
+        if (this.muted) qteAudio.stop();
+      }
+      if (command === "exit") {
+        this.stop();
+        this.onExit();
+      }
+      const choice = e.target.closest("[data-option-id]");
+      if (choice && !this.editing)
+        this.runtime?.resolve(true, choice.dataset.optionId);
+      const hot = e.target.closest("[data-hotspot]");
+      if (hot && !this.editing) this.runtime?.resolve(true);
+      const select = e.target.closest("[data-edit-event]");
+      if (select && this.editing) this.onSelect(select.dataset.editEvent);
+    };
+    root.addEventListener("click", this.clickHandler);
+    this.down = (e) => {
+      if (
+        this.editing ||
+        !this.runtime?.playing ||
+        this.loading ||
+        !this.runtime.active ||
+        e.button !== 0 ||
+        e.target.closest("button")
+      )
+        return;
+      const event = this.runtime.active.event;
+      if (event.kind !== "qte") return;
+      e.preventDefault();
+      this.pointer = {
+        id: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        began: this.runtime.active.elapsedMs,
+      };
+      this.stage.setPointerCapture?.(e.pointerId);
+      qteAudio.input(event.gesture);
+    };
+    this.up = (e) => {
+      if (!this.pointer || this.pointer.id !== e.pointerId) return;
+      const p = this.pointer;
+      this.pointer = null;
+      const active = this.runtime?.active;
+      if (!active || !this.runtime.playing) return;
+      const event = active.event,
+        dx = e.clientX - p.x,
+        dy = e.clientY - p.y,
+        dist = Math.hypot(dx, dy);
+      if (event.gesture === "click" && dist < 20) this.runtime.resolve(true);
+      else if (event.gesture === "multi" && dist < 20) {
+        active.clicks = (active.clicks || 0) + 1;
+        active.progress = active.clicks / event.clicks;
+        if (active.clicks >= event.clicks) this.runtime.resolve(true);
+      } else if (["left", "right", "up", "down"].includes(event.gesture)) {
+        const delta = { left: -dx, right: dx, up: -dy, down: dy }[
+          event.gesture
+        ];
+        if (
+          delta >= event.distance &&
+          (["left", "right"].includes(event.gesture)
+            ? Math.abs(dx) > Math.abs(dy)
+            : Math.abs(dy) > Math.abs(dx))
+        )
+          this.runtime.resolve(true);
+      } else if (event.gesture === "hold") active.progress = 0;
+      this.paintHud();
+    };
+    this.cancel = () => {
+      this.pointer = null;
+      if (this.runtime?.active) this.runtime.active.progress = 0;
+    };
+    this.visibility = () => {
+      if (document.hidden) this.runtime?.pause();
+    };
+    this.blur = () => {
+      this.cancel();
+      this.runtime?.pause();
+    };
+    this.stage.addEventListener("pointerdown", this.down);
+    this.stage.addEventListener("pointerup", this.up);
+    this.stage.addEventListener("pointercancel", this.cancel);
+    window.addEventListener("blur", this.blur);
+    document.addEventListener("visibilitychange", this.visibility);
+    this.frame = requestAnimationFrame((t) => this.loop(t));
+  }
+  async start(project, sceneId = project.entryId, time = 0) {
+    this.stop();
+    this.project = project;
+    this.runtime = new Runtime(project, (event, runtime) =>
+      this.update(event, runtime),
+    );
+    await qteAudio.unlock();
+    this.runtime.start(sceneId, time);
+  }
+  stop() {
+    this.token++;
+    this.runtime?.stop();
+    this.runtime = null;
+    this.cleanupMedia();
+    this.hud.innerHTML = "";
+    this.message.hidden = true;
+    this.eventId = null;
+  }
+  cleanupMedia() {
+    this.video?.pause();
+    if (this.video) {
+      this.video.removeAttribute("src");
+      this.video.load();
+    }
+    this.video = null;
+    for (const el of this.audio.values()) {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    }
+    this.audio.clear();
+    for (const v of this.prefetch || []) {
+      v.removeAttribute("src");
+      v.load();
+    }
+    this.prefetch = [];
+    this.pointer = null;
+    this.loading = false;
+    qteAudio.stop();
+  }
+  dispose() {
+    this.stop();
+    this.disposed = true;
+    cancelAnimationFrame(this.frame);
+    this.root.removeEventListener("click", this.clickHandler);
+    this.stage.removeEventListener("pointerdown", this.down);
+    this.stage.removeEventListener("pointerup", this.up);
+    this.stage.removeEventListener("pointercancel", this.cancel);
+    window.removeEventListener("blur", this.blur);
+    document.removeEventListener("visibilitychange", this.visibility);
+  }
+  async renderStill(project, scene, time = 0, focusEvent = null) {
+    this.project = project;
+    this.still = { scene, time, focusEvent };
+    if (
+      this.stillId !== scene.id ||
+      this.stillSource !==
+        JSON.stringify([scene.source, scene.video, scene.images])
+    ) {
+      this.stillId = scene.id;
+      this.stillSource = JSON.stringify([
+        scene.source,
+        scene.video,
+        scene.images,
+      ]);
+      await this.mount(scene, time);
+    }
+    if (this.video && Number.isFinite(this.video.duration)) {
+      const wanted = (scene.video.inMs + time) / 1000;
+      if (Math.abs(this.video.currentTime - wanted) > 0.03)
+        this.video.currentTime = Math.min(wanted, this.video.duration);
+      this.video.pause();
+    }
+    this.paintScene(scene, time);
+    const event =
+      scene.events.find((e) => e.id === focusEvent) ||
+      scene.events.find(
+        (e) =>
+          time >= e.startMs &&
+          (time <= e.endMs || e.startMs === duration(scene)),
+      );
+    this.paintEvent(event);
+  }
+  async mount(scene, time = 0) {
+    const token = ++this.token;
+    this.cleanupMedia();
+    this.visual.innerHTML = "";
+    this.message.hidden = true;
+    this.eventId = null;
+    this.hud.innerHTML = "";
+    this.loading = true;
+    this.stillImage = null;
+    this.stage.classList.toggle("grayscale", scene.grayscale);
+    this.stage.classList.toggle("death", scene.role === "death");
+    try {
+      if (scene.source === "video" && scene.video) {
+        const v = document.createElement("video");
+        v.playsInline = true;
+        v.preload = "auto";
+        v.muted = this.muted;
+        this.video = v;
+        this.visual.append(v);
+        const url = await this.assets.url(
+          this.project.assets[scene.video.assetId],
+        );
+        if (token !== this.token) return;
+        await new Promise((resolve, reject) => {
+          let timer;
+          const clean = () => {
+            clearTimeout(timer);
+            v.onloadedmetadata = null;
+            v.onerror = null;
+          };
+          v.onloadedmetadata = () => {
+            clean();
+            resolve();
+          };
+          v.onerror = () => {
+            clean();
+            reject(Error("视频无法播放，请检查格式或重新加载"));
+          };
+          timer = setTimeout(() => {
+            clean();
+            reject(Error("视频读取超时，请重试"));
+          }, 30000);
+          v.src = url;
+          v.load();
+        });
+        if (token !== this.token) return;
+        if (scene.video.outMs > v.duration * 1000 + 100)
+          throw Error("视频时长短于段落设置，请检查素材与出点");
+        v.currentTime = (scene.video.inMs + time) / 1000;
+        v.onerror = () => {
+          if (token === this.token)
+            this.showError("视频播放中断，请重新加载当前段落");
+        };
+        v.onwaiting = () => {
+          if (token === this.token) {
+            this.buffering = true;
+            this.status("正在缓冲…");
+          }
+        };
+        v.onplaying = () => {
+          this.buffering = false;
+          this.status("");
+        };
+        v.oncanplay = () => {
+          this.buffering = false;
+        };
+        v.onended = () => {
+          this.buffering = false;
+        };
+      } else if (scene.source === "images") {
+        const img = new Image();
+        img.alt = scene.name;
+        this.visual.append(img);
+        this.image = img;
+        await this.paintImage(scene, time, token);
+      } else {
+        this.visual.innerHTML = '<div class="scenery"><div></div></div>';
+      }
+      if (token !== this.token) return;
+      for (const clip of scene.audio) {
+        const audio = new Audio();
+        audio.preload = "metadata";
+        audio.volume = clip.volume;
+        audio.muted = this.muted;
+        this.audio.set(clip.id, audio);
+        audio.src = await this.assets.url(this.project.assets[clip.assetId]);
+        audio.onerror = () => {
+          if (token === this.token)
+            this.showError("配音或音乐无法播放，请检查素材后重试");
+        };
+        if (token !== this.token) {
+          audio.pause();
+          return;
+        }
+      }
+      this.loading = false;
+      this.buffering = false;
+      this.message.hidden = true;
+      this.paintScene(scene, time);
+      if (!this.editing && this.runtime?.playing) await this.syncMedia();
+    } catch (error) {
+      if (token === this.token) {
+        this.loading = false;
+        this.showError(error.message);
+      }
+    }
+  }
+  async paintImage(scene, time, token = this.token) {
+    let offset = 0;
+    const f = scene.images.find((f, i) => {
+      offset += f.durationMs;
+      return time < offset || i === scene.images.length - 1;
+    });
+    if (!f || this.stillImage === f.id) return;
+    this.stillImage = f.id;
+    const url = await this.assets.url(this.project.assets[f.assetId]);
+    if (token !== this.token) return;
+    const img = this.visual.querySelector("img");
+    if (img) {
+      img.onerror = () => this.showError("图片无法读取，请重试或检查素材");
+      img.src = url;
+      img.alt = this.project.assets[f.assetId]?.name || scene.name;
+    }
+  }
+  status(text) {
+    this.root.querySelector(".play-status").textContent = text;
+  }
+  update(event, runtime) {
+    if (event.type === "scene") {
+      this.mount(runtime.scene, runtime.timeMs);
+      this.preloadNext(runtime.scene);
+    }
+    if (event.type === "seek") {
+      if (this.video)
+        this.video.currentTime =
+          (runtime.scene.video.inMs + runtime.timeMs) / 1000;
+      this.cancel();
+      this.eventId = null;
+    }
+    if (event.type === "pause") {
+      this.cancel();
+      qteAudio.stop();
+      this.pauseMedia();
+    }
+    if (event.type === "resume") {
+      this.last = performance.now();
+      if (runtime.active) this.startSound(runtime.active.event);
+      this.syncMedia();
+    }
+    if (event.type === "event") {
+      this.pointer = null;
+      this.startSound(runtime.active.event);
+    }
+    if (event.type === "result") {
+      this.pointer = null;
+      qteAudio.result(event.ok);
+      const el = this.root.querySelector(".feedback");
+      el.textContent = event.ok ? "✓ 操作成功" : "操作超时";
+      el.classList.remove("show");
+      void el.offsetWidth;
+      el.classList.add("show");
+      setTimeout(() => {
+        if (!this.runtime?.active) qteAudio.stop();
+      }, 300);
+    }
+    if (event.type === "complete") {
+      this.cleanupMedia();
+      this.hud.innerHTML = "";
+      this.message.hidden = false;
+      this.message.innerHTML =
+        '<h2>故事告一段落</h2><p>你可以重新开始，探索另一条路线。</p><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button>';
+    }
+    if (event.type === "stop") this.cleanupMedia();
+    if (runtime.scene && runtime.state === "playing") {
+      this.paintScene(runtime.scene, runtime.timeMs);
+      this.paintEvent(runtime.active?.event);
+      this.paintHud();
+      this.syncMedia();
+    }
+    this.root.querySelector('[data-player="pause"]').textContent =
+      runtime.playing ? "暂停" : "继续";
+    this.onChange(event, runtime);
+  }
+  startSound(e) {
+    if (e.kind === "qte" && !this.muted)
+      qteAudio.start({
+        qteSound: e.sound,
+        qteVolume: e.volume,
+        limit: e.timeoutMs / 1000,
+      });
+  }
+  pauseMedia() {
+    this.video?.pause();
+    for (const a of this.audio.values()) a.pause();
+  }
+  async syncMedia() {
+    const r = this.runtime;
+    if (!r || this.loading || r.state !== "playing") return;
+    if (this.video) {
+      this.video.playbackRate = r.rate;
+      if (r.mediaPaused || r.timeMs >= duration(r.scene)) {
+        this.video.pause();
+        if (
+          r.active?.event.pause &&
+          Math.abs(
+            this.video.currentTime * 1000 - r.scene.video.inMs - r.timeMs,
+          ) > 100
+        )
+          this.video.currentTime = (r.scene.video.inMs + r.timeMs) / 1000;
+      } else if (this.video.paused && !this.playAttempt) {
+        this.playAttempt = true;
+        try {
+          await this.video.play();
+        } catch {
+          if (this.runtime === r) {
+            r.pause();
+            this.message.hidden = false;
+            this.message.innerHTML =
+              "<p>浏览器需要你点击后开始播放</p><button data-resume-media>点击播放</button>";
+            this.message.querySelector("button").onclick = () => {
+              this.message.hidden = true;
+              r.resume();
+            };
+          }
+        } finally {
+          this.playAttempt = false;
+        }
+      }
+    }
+    for (const clip of r.scene.audio) {
+      const a = this.audio.get(clip.id);
+      if (!a) continue;
+      const active =
+        !r.mediaPaused && r.timeMs >= clip.startMs && r.timeMs < clip.endMs;
+      if (!active) {
+        a.pause();
+        continue;
+      }
+      const wanted = (r.timeMs - clip.startMs + clip.inMs) / 1000;
+      if (
+        Number.isFinite(a.duration) &&
+        Math.abs(a.currentTime - wanted) > 0.15
+      )
+        a.currentTime = wanted;
+      a.playbackRate = r.rate;
+      a.volume = clip.volume;
+      if (a.paused) a.play().catch(() => {});
+    }
+  }
+  paintScene(scene, time) {
+    if (scene.source === "images")
+      this.paintImage(scene, time).catch((e) => this.showError(e.message));
+    const title = this.root.querySelector(".scene-title");
+    title.hidden = scene.clean && scene.role === "story";
+    const text = `${scene.name}|${scene.subtitle}|${scene.role}`;
+    if (title.dataset.text !== text) {
+      title.dataset.text = text;
+      title.innerHTML = `<small>${scene.role === "death" ? "◇" : scene.role === "ending" ? "THE END" : ""}</small><h2>${esc(scene.name)}</h2><p>${esc(scene.subtitle)}</p>`;
+    }
+    const captions = scene.subtitles.filter(
+      (c) => time >= c.startMs && time < c.endMs,
+    );
+    const html = captions
+      .map(
+        (c) =>
+          `<span style="left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
+      )
+      .join("");
+    const host = this.root.querySelector(".captions");
+    if (host.innerHTML !== html) host.innerHTML = html;
+    const bars = scene.effects.find(
+      (e) => e.kind === "bars" && time >= e.startMs && time < e.endMs,
+    );
+    let height = 0;
+    if (bars) {
+      const ease = (x) => {
+        x = clamp(x, 0, 1);
+        return x * x * (3 - 2 * x);
+      };
+      height =
+        bars.value *
+        Math.min(
+          ease((time - bars.startMs) / 800),
+          ease((bars.endMs - time) / 800),
+        );
+    }
+    this.root
+      .querySelector(".bars")
+      .style.setProperty("--bar-height", height + "%");
+  }
+  paintEvent(event) {
+    const key = event
+      ? JSON.stringify([event, this.editing ? null : this.runtime?.variables])
+      : "";
+    if (this.hud.dataset.key === key) return;
+    this.hud.dataset.key = key;
+    this.hud.innerHTML = "";
+    this.eventId = event?.id;
+    if (!event) return;
+    const edit = this.editing ? `data-edit-event="${esc(event.id)}"` : "";
+    if (event.kind === "choice") {
+      const opts = this.editing ? event.options : this.runtime.visibleOptions();
+      this.hud.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><img alt="" src="assets/ui/option-${i % 2 ? "circle" : "triangle"}.png"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
+      if (!opts.length && !this.editing)
+        this.showError("当前条件下没有可用选项，请联系作品作者");
+    } else if (event.kind === "hotspot")
+      this.hud.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
+    else {
+      const glyph = {
+        click: "＋",
+        multi: "＋",
+        hold: "◉",
+        up: "↑",
+        down: "↓",
+        left: "←",
+        right: "→",
+      }[event.gesture];
+      this.hud.innerHTML = `<div ${edit} class="qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><span class="qte-hint">${esc(event.hint || gestures[event.gesture])}</span><div class="qte-frame"><svg viewBox="0 0 100 100"><circle class="ring" cx="50" cy="50" r="36"/><circle class="meter" cx="50" cy="50" r="36" pathLength="100"/></svg><b>${glyph}</b></div><div class="qte-progress"></div><small class="qte-count"></small></div>`;
+    }
+  }
+  paintHud() {
+    const active = this.runtime?.active;
+    if (!active) return;
+    const e = active.event;
+    const remaining =
+      e.endMode === "clock"
+        ? Math.max(0, e.timeoutMs - active.elapsedMs)
+        : e.endMode === "range"
+          ? Math.max(0, e.endMs - this.runtime.timeMs)
+          : null;
+    const el = this.hud.querySelector(".qte");
+    if (el) {
+      el.style.setProperty("--progress", String((active.progress || 0) * 100));
+      el.querySelector(".qte-count").textContent =
+        e.gesture === "multi"
+          ? `${active.clicks || 0} / ${e.clicks}`
+          : remaining === null
+            ? ""
+            : `${(remaining / 1000).toFixed(1)} 秒`;
+      el.classList.toggle("urgent", remaining !== null && remaining < 1000);
+    }
+  }
+  loop(now) {
+    if (this.disposed) return;
+    const dt = now - this.last;
+    this.last = now;
+    const r = this.runtime;
+    if (r && !this.loading) {
+      r.tick(
+        dt,
+        this.video ? this.video.currentTime * 1000 - r.scene.video.inMs : null,
+        this.buffering,
+      );
+      if (
+        this.pointer &&
+        r.active &&
+        r.playing &&
+        !this.buffering &&
+        r.active.event.gesture === "hold"
+      ) {
+        r.active.progress = clamp(
+          (r.active.elapsedMs - this.pointer.began) / r.active.event.holdMs,
+          0,
+          1,
+        );
+        if (!this.muted) qteAudio.progress(r.active.progress);
+        if (r.active.progress >= 1) {
+          this.pointer = null;
+          r.resolve(true);
+        }
+        this.paintHud();
+      }
+    }
+    this.frame = requestAnimationFrame((t) => this.loop(t));
+  }
+  showError(text) {
+    this.pauseMedia();
+    this.runtime?.pause();
+    this.message.hidden = false;
+    this.message.innerHTML = `<h3>播放暂时中断</h3><p>${esc(text)}</p>${this.editing ? "" : '<button data-retry>重试当前段落</button><button data-player="exit">返回开屏</button>'}`;
+    this.message
+      .querySelector("[data-retry]")
+      ?.addEventListener("click", () => {
+        const r = this.runtime;
+        const time = r.timeMs;
+        this.mount(r.scene, time).then(() => r.resume());
+      });
+  }
+  preloadNext(scene) {
+    for (const v of this.prefetch || []) {
+      v.removeAttribute("src");
+      v.load();
+    }
+    this.prefetch = [];
+    const targets = [
+      scene.next,
+      ...scene.events.flatMap((e) => [
+        e.success.target,
+        e.failure.target,
+        ...e.options.map((o) => o.target),
+      ]),
+    ];
+    const ids = [
+      ...new Set(
+        targets.filter((t) => t.kind === "scene").map((t) => t.sceneId),
+      ),
+    ].slice(0, 2);
+    const token = this.token;
+    for (const id of ids) {
+      const s = this.project.scenes.find((s) => s.id === id);
+      if (!s?.video || s.source !== "video") continue;
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      this.prefetch.push(v);
+      this.assets
+        .url(this.project.assets[s.video.assetId])
+        .then((url) => {
+          if (token === this.token) v.src = url;
+        })
+        .catch(() => {});
+    }
+  }
+}

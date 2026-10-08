@@ -1,38 +1,48 @@
-# 独立游戏站与编辑器同步
+# 新版编辑器与独立运行端部署
 
-编辑器与游戏 Worker 共享一个 Cloudflare KV namespace。读配置和素材是公开接口；写入需要编辑器 Worker 的 `PUBLISH_TOKEN` secret。游戏 Worker 即便意外配置了相同 secret，也拒绝所有写请求。
+两个 Worker 共用 `PROJECT_STORE` 媒体 KV，并共用编辑器 Worker 内的 `ProjectCoordinator` Durable Object。私有草稿和发布版本存入 Durable Object，旧作品及原媒体继续从现有 KV 读取。
 
-## 一次性配置
-
-1. 创建 `wanxiang_storyforge_project` KV namespace，并把同一个 namespace 绑定到两个 Worker 的 `PROJECT_STORE`。KV 不需要开通 R2。
-2. 将高强度随机密钥写入编辑器 Worker 的 secret：`npx wrangler secret put PUBLISH_TOKEN --config outputs/cloudflare/wrangler.jsonc`。不要把密钥提交到 Git。
-3. 执行 `node outputs/cloudflare/build.cjs`，然后分别部署 `wrangler.jsonc` 和 `wrangler.game.jsonc`。
-4. 在原编辑器浏览器中连接发布密钥并点击“部署”，上传实际使用的项目。首次发布前，游戏站显示“作品尚未发布”，不会擅自采用默认项目。
-
-编辑器首次部署会询问发布密钥。也可通过仅含 fragment 的私有设置链接 `编辑器地址/#publish-key=密钥` 连接，脚本读取后立即清除地址中的 fragment。设置链接不要分享；玩家只使用无密钥的游戏网址。发布权限保存在该编辑器浏览器中，可通过清除 `storyforge-publish-token` 或轮换 Worker secret 撤销。
-
-## 保存与部署规则
-
-编辑器启动优先读取云端部署版本，跳过默认项目初始化；原浏览器草稿保留为本机备份，可用“恢复本机草稿”找回。无云端部署时才加载本机或默认项目。读取失败禁止部署。
-
-“保存配置”仅保存本机。编辑器每 30 秒检查部署版本：未编辑时自动更新，有草稿时提示刷新且不覆盖草稿。部署使用打开项目时的版本号；旧版客户端必须刷新才能部署。
-
-- 编辑时仍自动保存本机草稿；点击“部署”才同步游戏站。导出项目不触发发布。
-- 图片、视频按 SHA-256 去重，每 20 MB 一块永久保存并直接上传，不转码；目前单文件上限为 1 GB。
-- 所有素材就绪后才原子替换发布配置。失败保留旧发布版和本机草稿，可再次点击保存重试。
-- 部署使用编辑基准 ETag 检查旧版本冲突。当前 KV 为最终一致存储，跨地区传播可能延迟，极短窗口内同时部署仍存在竞争；不应把此检查视为强一致事务锁。
-- 游戏站每 30 秒检查版本，未开始时自动刷新配置；正在游戏时提示有更新，点击更新或重新开始才切换。新打开和重新开始都会读取最新版。
-- 老素材暂不自动清理，避免影响正在播放旧版本的访客。长期使用应增加保留周期及按版本清理策略。
-
-## 本地验证
-
-在 `outputs/cloudflare/.dev.vars` 写入仅用于本地测试的 `PUBLISH_TOKEN=local-test-publish-key`（已被 Git 排除）。
+## 部署
 
 ```sh
-node outputs/cloudflare/build.cjs
-npx wrangler dev --config outputs/cloudflare/wrangler.jsonc --port 4176 --persist-to work/cloudflare-local
-npx wrangler dev --config outputs/cloudflare/wrangler.game.jsonc --port 4175 --persist-to work/cloudflare-local
-node work/test-cloud-publishing.cjs
+npm ci
+npm run check
+npm test
+npm run build
+npx wrangler deploy --config outputs/cloudflare/wrangler.jsonc
+npx wrangler deploy --config outputs/cloudflare/wrangler.game.jsonc
 ```
 
-测试使用浏览器独立上下文和本地 KV，不修改线上配置。验证保存、分块素材上传、独立播放、重新开始读取最新版、Range 视频请求、权限拒绝、缺素材时保留旧配置和并发冲突。浏览器测试路径与已有测试一样按原开发机配置。
+先部署编辑器，创建 `v2-projects` SQLite Durable Object 迁移；再部署引用该对象的游戏 Worker。保留已有编辑器 `PUBLISH_TOKEN` secret；新环境才需要通过 `wrangler secret put PUBLISH_TOKEN` 设置，真实密钥不要写入 Git。游戏 Worker 不需要发布密钥，即使收到有效授权也拒绝私有接口及写入。
+
+Wrangler 4.148.0 已完成部署包检查。`npm run build` 原样复制素材，对超限视频生成媒体分块；Asset binding 内使用规范化的 `/game` 路径，避免 `.html` 重定向循环。
+
+## 数据与兼容
+
+- 浏览器优先恢复本机草稿，旧数据迁移前保存本机备份；旧脚本和 `/legacy` 恢复入口保留。
+- 授权后的草稿自动同步；串行保存、修订号比对，冲突时保留本机修改。
+- 发布时先检查素材并上传，再建立不可变版本，最后切换最新指针。回退只切换指针。
+- 播放器固定本次打开时的版本；访问 `?version=版本号` 可永久定位该版本。刷新固定作品链接才会读最新发布版。
+- 新版尚未发布时，运行端会读取旧 `/api/project` 并迁移播放。因此升级程序不会把旧作品替换为制作示例。
+- 媒体 SHA-256 去重，每块 20 MB、每文件上限 1 GB，原视频不转码。KV 跨区域传播可能延迟，上传确认失败时可重试，旧版本保留。
+- 历史版本和媒体暂不自动清理；当前是单创作者授权，非多租户账户系统。
+
+## 自定义域名
+
+目标为 `https://www.talesparkai.cc/`，绑定到 `wanxiang-game`；编辑器仍使用独立 workers.dev 地址。Cloudflare Custom Domain 要求该域名对应一个已激活的 Cloudflare zone，不能仅把外部 DNS 的 CNAME 指向 workers.dev。
+
+接入前必须完整保留现有 DNS，尤其 Google 邮箱 MX、TXT、SPF、DKIM 和 DMARC；域名仍可在 Namecheap 购买和续费，只切换 DNS 托管。确认 Cloudflare 指派的域名服务器并等待 zone 激活后，为游戏配置增加：
+
+```json
+"routes": [{ "pattern": "www.talesparkai.cc", "custom_domain": true }]
+```
+
+不要在 zone 尚未准备好时加入正式配置。完成后检查 HTTPS、根路径播放器、媒体 Range、公开版本读取及私有接口拒绝；另行按需要设置裸域跳转。
+
+参考：[Cloudflare Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)。
+
+## 本机测试
+
+`npm start` 提供同样的草稿、媒体和发布 API，并将测试数据保存到 `work/local-data`。默认授权 `local-development-only`，服务仅监听 127.0.0.1。可用 `PORT`、`STORYFORGE_DATA`、`PUBLISH_TOKEN` 环境变量覆盖；此适配器不用于公网生产。
+
+`npm test` 覆盖真实 HTTP/磁盘持久化以及服务权限、版本冲突、缺媒体、不可变版本和回退。浏览器验收记录在 `docs/VERIFICATION.md`。

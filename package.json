@@ -1,0 +1,17 @@
+{
+  "name": "wanxiang-storyforge",
+  "private": true,
+  "version": "2.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node work/server.cjs",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node outputs/cloudflare/build.cjs",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
+}

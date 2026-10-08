@@ -1,6 +1,6 @@
 const HASH = /^[a-f0-9]{64}$/;
 const MIME =
-  /^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm|quicktime|ogg)|audio\/(mpeg|wav|ogg))$/;
+  /^(image\/(png|jpeg|webp|gif)|video\/(mp4|webm|quicktime|ogg)|audio\/(mpeg|wav|ogg|mp4|webm))$/;
 const json = (data, status = 200, headers = {}) =>
   Response.json(data, {
     status,

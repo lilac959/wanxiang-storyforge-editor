@@ -1,0 +1,192 @@
+import { clone, duration, evaluate, applyActions, clamp } from "./model.mjs";
+
+// No DOM, media elements or editor selection state. A view supplies media time.
+export class Runtime {
+  constructor(project, changed = () => {}) {
+    this.project = clone(project);
+    this.changed = changed;
+    this.variables = clone(project.variables);
+    this.generation = 0;
+    this.state = "idle";
+    this.scene = null;
+    this.timeMs = 0;
+    this.playing = false;
+    this.processed = new Set();
+    this.active = null;
+    this.pending = null;
+    this.suppressedSpeeds = new Set();
+  }
+  emit(type = "tick", detail = {}) {
+    this.changed({ type, ...detail }, this);
+  }
+  start(id = this.project.entryId, time = 0) {
+    this.variables = clone(this.project.variables);
+    this.enter(id, time, true);
+  }
+  enter(id, time = 0, skip = false) {
+    const scene = this.project.scenes.find((s) => s.id === id);
+    if (!scene) {
+      this.complete();
+      return;
+    }
+    this.generation++;
+    this.scene = scene;
+    this.timeMs = clamp(Math.round(time), 0, duration(scene));
+    this.playing = true;
+    this.state = "playing";
+    this.processed = new Set();
+    this.active = null;
+    this.pending = null;
+    this.suppressedSpeeds = new Set();
+    if (skip)
+      for (const e of scene.events)
+        if (e.startMs < this.timeMs) this.processed.add(e.id);
+    this.emit("scene");
+  }
+  complete() {
+    this.generation++;
+    this.state = "complete";
+    this.playing = false;
+    this.active = null;
+    this.emit("complete");
+  }
+  stop() {
+    this.generation++;
+    this.playing = false;
+    this.state = "idle";
+    this.active = null;
+    this.pending = null;
+    this.emit("stop");
+  }
+  pause() {
+    if (!this.playing) return;
+    this.playing = false;
+    this.emit("pause");
+  }
+  resume() {
+    if (!this.scene || this.state !== "playing") return;
+    this.playing = true;
+    this.emit("resume");
+  }
+  get mediaPaused() {
+    return !this.playing || !!this.active?.event.pause;
+  }
+  get rate() {
+    if (!this.scene) return 1;
+    return (
+      this.scene.effects.find(
+        (e) =>
+          e.kind === "speed" &&
+          !this.suppressedSpeeds.has(e.id) &&
+          this.timeMs >= e.startMs &&
+          this.timeMs < e.endMs,
+      )?.value || 1
+    );
+  }
+  visibleOptions() {
+    return (
+      this.active?.event.options.filter((o) =>
+        evaluate(o.condition, this.variables),
+      ) || []
+    );
+  }
+  tick(realMs, mediaTime = null, buffering = false) {
+    if (!this.playing || this.state !== "playing" || !this.scene || buffering)
+      return;
+    const token = this.generation,
+      d = duration(this.scene),
+      dt = clamp(realMs, 0, 250);
+    if (!this.active?.event.pause)
+      this.timeMs = clamp(
+        Math.round(
+          mediaTime === null ? this.timeMs + dt * this.rate : mediaTime,
+        ),
+        0,
+        d,
+      );
+    if (this.active) {
+      this.active.elapsedMs += dt;
+      const e = this.active.event;
+      if (
+        (e.endMode === "clock" && this.active.elapsedMs >= e.timeoutMs) ||
+        (e.endMode === "range" && this.timeMs >= e.endMs)
+      )
+        this.resolve(false);
+    }
+    if (token !== this.generation) return;
+    if (!this.active) {
+      const events = [...this.scene.events].sort(
+        (a, b) => a.startMs - b.startMs,
+      );
+      for (const event of events) {
+        if (this.processed.has(event.id) || event.startMs > this.timeMs)
+          continue;
+        this.processed.add(event.id);
+        if (!evaluate(event.condition, this.variables)) continue;
+        this.active = { event, elapsedMs: 0, progress: 0 };
+        if (event.pause) this.timeMs = event.startMs;
+        this.emit("event");
+        break;
+      }
+    }
+    if (!this.active && this.timeMs >= d) {
+      const target = this.pending || this.scene.next;
+      this.pending = null;
+      this.follow(target);
+      if (token === this.generation && target.kind === "continue")
+        this.complete();
+      return;
+    }
+    this.emit();
+  }
+  resolve(ok, optionId = null) {
+    if (!this.playing || !this.active) return false;
+    const e = this.active.event;
+    let result = ok ? e.success : e.failure;
+    if (e.kind === "choice" && ok) {
+      const o = this.visibleOptions().find((o) => o.id === optionId);
+      if (!o) return false;
+      result = {
+        target: o.target,
+        timing: "immediate",
+        actions: o.actions,
+        restoreSpeed: false,
+      };
+    }
+    this.active = null;
+    applyActions(result.actions, this.variables);
+    if (result.restoreSpeed)
+      for (const f of this.scene.effects)
+        if (
+          f.kind === "speed" &&
+          f.startMs <= this.timeMs &&
+          this.timeMs <= f.endMs
+        )
+          this.suppressedSpeeds.add(f.id);
+    this.emit("result", { ok, event: e });
+    if (result.timing === "sceneEnd" && result.target.kind !== "continue")
+      this.pending = clone(result.target);
+    else this.follow(result.target);
+    this.emit();
+    return true;
+  }
+  follow(target) {
+    if (target.kind === "scene") this.enter(target.sceneId);
+    else if (target.kind === "end") this.complete();
+    else if (target.kind === "seek") this.seek(target.timeMs);
+  }
+  seek(time) {
+    const from = this.timeMs,
+      to = clamp(Math.round(time), 0, duration(this.scene));
+    this.active = null;
+    this.pending = null;
+    this.generation++;
+    for (const e of this.scene.events) {
+      if (e.startMs < to) this.processed.add(e.id);
+      else if (to <= from) this.processed.delete(e.id);
+    }
+    if (to <= from) this.suppressedSpeeds.clear();
+    this.timeMs = to;
+    this.emit("seek");
+  }
+}

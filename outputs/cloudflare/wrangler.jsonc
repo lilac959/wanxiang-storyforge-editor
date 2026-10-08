@@ -4,18 +4,28 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-09-14",
   "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT_COORDINATOR", "class_name": "ProjectCoordinator" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v2-projects", "new_sqlite_classes": ["ProjectCoordinator"] },
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": [
       "/api/*",
-      "/assets/chapter01-branch-7.mp4"
-    ]
+      "/game",
+      "/game/",
+      "/assets/chapter01-branch-7.mp4",
+    ],
   },
   "kv_namespaces": [
     {
       "binding": "PROJECT_STORE",
-      "id": "193077a2c5154127b9e5a02d52d1ec85"
-    }
-  ]
+      "id": "193077a2c5154127b9e5a02d52d1ec85",
+    },
+  ],
 }

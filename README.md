@@ -1,28 +1,46 @@
-# 万象环轨 · 互动影游编辑器
+# 叙境 · 在线互动影游编辑器
 
-原生 HTML、CSS、JavaScript 编辑器，包含剧情节点、分镜、时间轴、鼠标 QTE、电影黑边及项目导入导出。
+在线编辑器 + 独立作品运行端。在完整视频或分镜序列的任意位置添加多次操作、选择、热点、字幕、音频、速度和电影黑边区间。
 
 ## 本地运行
 
-安装 Node.js 后，在仓库根目录执行：
+安装 Node.js 22 或更新版本后，在仓库根目录执行：
 
 ```sh
-node work/server.cjs
+git lfs pull
+npm ci
+npm start
 ```
 
-打开 http://127.0.0.1:4173/ 。运行源码和所需素材位于 `outputs/storyforge`。
+编辑器打开 <http://127.0.0.1:4173/>，运行端打开 <http://127.0.0.1:4173/game>。
+
+本机“连接云端”测试授权为 `local-development-only`，仅供本地测试，服务只监听回环地址。本地服务数据在 `work/local-data`，浏览器草稿和素材在 localStorage/IndexedDB。首次可在“作品与恢复”打开制作示例，或导入仓库的原始项目 ZIP。
 
 ## 构建与打包
 
 ```sh
-node outputs/cloudflare/build.cjs
-python work/package-mechanical.py
+npm run check
+npm test
+npm run build
 ```
 
-Cloudflare 部署配置位于 `outputs/cloudflare/wrangler.jsonc`，部署前需登录对应账号。构建副本、打包 ZIP 和临时设计稿不纳入版本管理。
+Cloudflare 部署配置位于 `outputs/cloudflare/wrangler.jsonc` 和 `wrangler.game.jsonc`。先部署编辑器，再部署运行端。构建副本和本机数据不纳入版本管理，原始素材不转码、不压缩。
 
 ## 检查与维护
 
-详见 [维护记录](work/REFACTOR.md)。现有浏览器测试仍包含原开发机的 Playwright 和 Edge 绝对路径，换机器运行前需要调整。部分历史测试对应旧设计；最近的回归集合为 `work/run-refactor-checks.cjs`。
+新版自动测试位于 `tests/`，不依赖浏览器。覆盖实际项目迁移、事件时钟、撤销、自动保存、发布冲突、媒体 Range 和重启持久化。旧 `work/test-*` 对应历史设计，含原开发机绝对路径，不属于新版回归入口。
 
-`work/refactor-backup/timeline-editor.js` 是渲染一致性测试使用的历史基线，不属于运行入口。
+## 功能与结构
+
+- 剧情地图：拖动段落、连接分支、明确入口，死亡与结局均可编辑。
+- 时间轴：画面、互动、字幕、音频、播放速度、黑边分别编辑。完整视频里可以安排多次互动；慢放是普通区间，没有片尾慢放专用开关。
+- 操作：单击、连续点击、长按、四方向滑动、选择和热点；暂停等待、现实倒计时或按视频区间结束。
+- 结果：继续、视频内跳转、进入另一段、结束作品；支持立即执行或播完再执行，以及条件、变量赋值和加分。
+- 本机备份、撤销重做、旧项目迁移、完整素材 ZIP 导入导出。
+- 私有云端草稿、串行保存、冲突提示、独立发布版本和回退。
+- `outputs/storyforge/studio/` 为新模块；`game.html` 为独立运行端；`legacy.html` 保留旧版恢复入口。
+- `outputs/cloudflare/projects.mjs` 提供草稿与版本服务，使用 Durable Object 串行写入。
+
+详见 [使用说明](docs/USER-GUIDE.md)、[设计约定](docs/REFACTOR-V2.md)、[部署说明](outputs/cloudflare/PUBLISHING.md)、[验证记录](docs/VERIFICATION.md)。
+
+目前使用单主视频或图片序列，不包含多路视频混合、转码、多人实时协作、计费系统或任意脚本插件。手机端仍需真机验收编码兼容性。
