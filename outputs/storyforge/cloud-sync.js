@@ -254,6 +254,7 @@ async function publishProject(snapshot, interactive = true) {
 function usePublishedProject(envelope) {
   if (!valid(envelope.project)) throw Error("游戏配置无效");
   project = envelope.project;
+  installEndingNode(project);
   gameVersion = envelope.version;
   selected = project.nodes[0].id;
   if (cloudPlayer) media.clear();
