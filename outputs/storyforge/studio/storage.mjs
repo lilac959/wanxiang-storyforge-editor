@@ -35,6 +35,16 @@ export class Storage {
           if (saved?.project?.id === detail.projectId) {
             saved.revision = this.queue.revision;
             this.setLocal(saved);
+            const catalog = JSON.parse(
+              localStorage.getItem("storyforge-projects") || "{}",
+            );
+            if (catalog[detail.projectId]) {
+              catalog[detail.projectId].revision = this.queue.revision;
+              localStorage.setItem(
+                "storyforge-projects",
+                JSON.stringify(catalog),
+              );
+            }
           }
         }
         this.status(state, detail);
@@ -84,6 +94,17 @@ export class Storage {
       updatedAt: new Date().toISOString(),
       origin: saved?.origin || "local",
     });
+    const catalog = JSON.parse(
+      localStorage.getItem("storyforge-projects") || "{}",
+    );
+    if (!catalog[project.id]?.deleted) {
+      catalog[project.id] = {
+        project: clone(project),
+        revision: this.queue.revision,
+        updatedAt: new Date().toISOString(),
+      };
+      localStorage.setItem("storyforge-projects", JSON.stringify(catalog));
+    }
     this.status("local");
   }
   backup(project, label = "导入前") {
@@ -116,12 +137,13 @@ export class Storage {
       }),
     );
   }
-  async published(version = "") {
+  async published(version = "", projectId = "") {
     return response(
       await fetch(
         version
           ? `/api/v2/release/${encodeURIComponent(version)}`
-          : "/api/v2/published",
+          : "/api/v2/published" +
+              (projectId ? "?id=" + encodeURIComponent(projectId) : ""),
         { cache: "no-store", signal: AbortSignal.timeout(20000) },
       ),
     );
@@ -268,12 +290,12 @@ export class Storage {
     const p = await this.prepare(project);
     let version = "none";
     try {
-      version = (await this.published()).version;
+      version = (await this.published("", p.id)).version;
     } catch (e) {
       if (e.status !== 404) throw e;
     }
     return response(
-      await fetch("/api/v2/publish", {
+      await fetch("/api/v2/publish?id=" + encodeURIComponent(p.id), {
         method: "POST",
         headers: this.headers({
           "Content-Type": "application/json",
@@ -284,25 +306,33 @@ export class Storage {
       }),
     );
   }
-  async versions() {
+  async versions(projectId = "") {
     return response(
-      await fetch("/api/v2/versions", {
-        headers: this.headers(),
-        cache: "no-store",
-      }),
+      await fetch(
+        "/api/v2/versions" +
+          (projectId ? "?id=" + encodeURIComponent(projectId) : ""),
+        {
+          headers: this.headers(),
+          cache: "no-store",
+        },
+      ),
     );
   }
-  async restore(version) {
-    const latest = await this.published();
+  async restore(version, projectId = "") {
+    const latest = await this.published("", projectId);
     return response(
-      await fetch("/api/v2/restore", {
-        method: "POST",
-        headers: this.headers({
-          "Content-Type": "application/json",
-          "If-Match": latest.version,
-        }),
-        body: JSON.stringify({ version }),
-      }),
+      await fetch(
+        "/api/v2/restore" +
+          (projectId ? "?id=" + encodeURIComponent(projectId) : ""),
+        {
+          method: "POST",
+          headers: this.headers({
+            "Content-Type": "application/json",
+            "If-Match": latest.version,
+          }),
+          body: JSON.stringify({ version }),
+        },
+      ),
     );
   }
 }

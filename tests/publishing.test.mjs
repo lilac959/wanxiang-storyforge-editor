@@ -157,3 +157,101 @@ test("malformed input and undeclared operations are rejected before storage", as
     );
   assert.equal(map.size, 0);
 });
+
+test("independent published links and rollback cannot replace another work", async () => {
+  const { service } = setup(),
+    call = (r) => service.fetch(r, { token });
+  const a = project(),
+    b = project();
+  a.id = "project-a";
+  b.id = "project-b";
+  const av = await (
+    await call(req("/publish?id=" + a.id, "POST", { project: a }))
+  ).json();
+  const bv = await (
+    await call(req("/publish?id=" + b.id, "POST", { project: b }))
+  ).json();
+  assert.ok(av.version);
+  assert.ok(bv.version);
+  assert.equal(
+    (
+      await (
+        await call(req("/published?id=" + a.id, "GET", null, "none", false))
+      ).json()
+    ).version,
+    av.version,
+  );
+  assert.equal(
+    (
+      await (
+        await call(req("/published?id=" + b.id, "GET", null, "none", false))
+      ).json()
+    ).version,
+    bv.version,
+  );
+  assert.equal(
+    (
+      await call(
+        req("/restore?id=" + a.id, "POST", { version: bv.version }, av.version),
+      )
+    ).status,
+    404,
+  );
+  a.name = "updated";
+  const next = await (
+    await call(req("/publish?id=" + a.id, "POST", { project: a }, av.version))
+  ).json();
+  assert.equal(
+    (
+      await call(
+        req(
+          "/restore?id=" + a.id,
+          "POST",
+          { version: av.version },
+          next.version,
+        ),
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (
+      await (
+        await call(req("/published?id=" + b.id, "GET", null, "none", false))
+      ).json()
+    ).version,
+    bv.version,
+  );
+});
+test("cloud archive remains private, reversible and keeps published version readable", async () => {
+  const { service } = setup(),
+    call = (r) => service.fetch(r, { token }),
+    p = project();
+  await call(req("/draft", "PUT", { project: p }));
+  const v = await (
+    await call(req("/publish?id=" + p.id, "POST", { project: p }))
+  ).json();
+  assert.equal(
+    (
+      await call(
+        req("/archive", "POST", { id: p.id, deleted: true }, "none", false),
+      )
+    ).status,
+    401,
+  );
+  assert.equal(
+    (await call(req("/archive", "POST", { id: p.id, deleted: true }))).status,
+    200,
+  );
+  assert.equal((await (await call(req("/projects"))).json())[0].deleted, true);
+  assert.equal(
+    (
+      await (
+        await call(req("/published?id=" + p.id, "GET", null, "none", false))
+      ).json()
+    ).version,
+    v.version,
+  );
+  await call(req("/archive", "POST", { id: p.id, deleted: false }));
+  assert.equal((await (await call(req("/projects"))).json())[0].deleted, false);
+});

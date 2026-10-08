@@ -1,3 +1,18 @@
+import { StoryBoard } from "./story-board.mjs";
+import { copyScenes, deleteScenes } from "./graph-commands.mjs";
+import {
+  visualClips,
+  clipLength,
+  mediaAt,
+  ensureSequence,
+  appendVisual,
+  splitClip,
+  moveClip,
+  reorderClip,
+  removeClip,
+  duplicateClip,
+  linked,
+} from "./timeline.mjs";
 import {
   clone,
   uid,
@@ -36,7 +51,13 @@ let storage = new Storage(assets, status),
   selected,
   selection = { kind: "scene" },
   page = "story",
-  graph = false,
+  graph = true,
+  board,
+  sceneViews = new Map(),
+  sceneSearch = "",
+  assetSearch = "",
+  pendingDelete = [],
+  connectionEdit = null,
   time = 0,
   zoom = 1.5,
   still,
@@ -75,11 +96,9 @@ function status(state, detail) {
   el.classList.toggle("error", ["error", "conflict"].includes(state));
   el.textContent =
     {
-      local: storage.token
-        ? "● 本机已保存 · 等待同步"
-        : "● 本机已保存 · 尚未连接云端",
-      saving: "● 正在同步草稿…",
-      saved: "● 草稿已同步 · 尚未发布",
+      local: storage.token ? "待同步" : "已保存到本机",
+      saving: "保存中…",
+      saved: "已保存",
       upload: `↑ ${detail?.name || "素材"} · ${detail?.progress || 0}%`,
       conflict: "● 云端有其他修改 · 本机副本保留",
       error: "● 云端保存失败 · 可重试",
@@ -87,7 +106,12 @@ function status(state, detail) {
   el.title = detail?.message || el.textContent;
 }
 function mutate(label, fn) {
-  history.commit(label, fn);
+  try {
+    history.commit(label, fn);
+  } catch (error) {
+    notify(error.message);
+    throw error;
+  }
 }
 function changed() {
   dirty = true;
@@ -154,6 +178,13 @@ const seconds = (label, path, value) =>
 function selectObject(project = p()) {
   const scene =
     project.scenes.find((x) => x.id === selected) || project.scenes[0];
+  if (selection.kind === "clip")
+    return (
+      scene.clips?.find((x) => x.id === selection.id) ||
+      visualClips(scene).find((x) => x.id === selection.id)
+    );
+  if (selection.kind === "overlay")
+    return scene.overlays?.find((x) => x.id === selection.id);
   return selection.kind === "scene"
     ? scene
     : selection.kind === "video"
@@ -171,7 +202,7 @@ function selectObject(project = p()) {
                 : scene;
 }
 function targetFields(label, path, t) {
-  return `<h3>${label}</h3>${field("后续动作", path + ".kind", t.kind, { options: { continue: "继续当前视频", scene: "进入另一剧情段落", seek: "跳到当前视频位置", end: "结束作品" } })}${t.kind === "scene" ? field("目标段落", path + ".sceneId", t.sceneId, { options: Object.fromEntries(p().scenes.map((x) => [x.id, x.name])) }) : t.kind === "seek" ? seconds("跳转到（秒）", path + ".timeMs", t.timeMs) : ""}`;
+  return `<h3>${label}</h3>${field("后续动作", path + ".kind", t.kind, { options: { continue: "继续当前视频", scene: "进入另一剧情段落", seek: "跳到当前视频位置", end: "结束作品", unlinked: "待连接" } })}${t.kind === "scene" ? field("目标段落", path + ".sceneId", t.sceneId, { options: Object.fromEntries(p().scenes.map((x) => [x.id, x.name])) }) : t.kind === "seek" ? seconds("跳转到（秒）", path + ".timeMs", t.timeMs) : ""}`;
 }
 function conditionFields(path, c) {
   const vars = Object.keys(p().variables);
@@ -205,11 +236,11 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    `<header class="topbar"><div class="brand"><b>叙</b>叙境<small>STORYFORGE</small></div><input class="project-name" aria-label="作品名称" data-field="name" data-scope="project"><span class="save-status"></span><button data-action="undo" title="撤销 Ctrl+Z">↶</button><button data-action="redo" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存草稿</button><button data-action="connect">连接云端</button><button data-action="import">导入</button><button data-action="export">导出</button><button data-action="versions">版本</button><button data-action="publish">发布作品</button><button class="primary" data-action="preview-all">▷ 试玩作品</button></header><div class="layout"><nav class="rail"><button data-page="story"><b>⌘</b>剧情编排</button><button data-page="assets"><b>▧</b>素材库</button><button data-page="loading"><b>◌</b>加载页面</button><button data-page="splash"><b>◈</b>开屏动画</button><button data-page="variables"><b>◇</b>剧情变量</button><button class="bottom" data-action="projects"><b>☷</b>作品与恢复</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><h1><span class="eyebrow">STORY WORKSPACE</span><br>剧情编排</h1><button data-action="canvas-view">画面编辑</button><button data-action="graph-view">剧情地图</button><button data-action="preview-current">▷ 预览当前</button></div><div class="story-work"><div class="canvas-label"><span></span><small>16:9 · 自适应画布</small></div><div class="canvas"><div class="player-root"></div></div><div class="board-list"></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴 · 选择内容后在右侧编辑</span><label>缩放 <input id="zoom" type="range" min="1" max="5" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="add-qte">＋ 操作</button><button data-action="add-choice">＋ 选择</button><button data-action="add-hotspot">＋ 热点</button><button data-action="add-subtitle">＋ 字幕</button><button data-action="add-audio">＋ 音频</button><button data-action="add-speed">＋ 慢放区间</button><button data-action="add-bars">＋ 电影黑边</button></div><div class="timeline-scroll"></div><p class="hint">拖动片段或两端调整时间，方向键微调 0.1 秒。拖动画面中的互动调整位置。定位只查看画面，点击 ▷ 才执行互动。</p></div><div class="graph-scroll" hidden><div class="graph-board"></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>`;
+    '<header class="topbar"><button class="brand" data-action="projects" title="作品管理"><b>叙</b>叙境</button><span class="top-divider"></span><input class="project-name" aria-label="作品名称" data-field="name" data-scope="project"><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><details class="more-menu"><summary aria-label="更多操作">···</summary><div><button data-action="save">保存草稿</button><button data-action="connect">连接云端</button><button data-action="import">导入作品</button><button data-action="export">导出备份</button><button data-action="versions">发布版本</button><button data-action="check-project">检查作品</button><button data-action="help">快捷操作</button></div></details><button data-action="preview-all">▷ 试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="loading" title="加载页面"><b>◌</b>加载</button><button data-page="splash" title="开屏动画"><b>◈</b>开屏</button><button data-page="theme" title="作品样式"><b>◐</b>样式</button><button data-page="variables" title="剧情记录"><b>◇</b>变量</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">▣</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="fit-graph" id="graph-scale" title="适应全部场景">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="arrange-graph" title="自动整理">整理</button><button data-action="locate-entry" title="定位入口">入口</button></div><div class="minimap" title="点击定位场景"></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
-    onSelect: (id) => {
-      selection = { kind: "event", id };
+    onSelect: (id, kind = "event") => {
+      selection = { kind, id };
       renderInspector();
       renderTimeline();
     },
@@ -242,7 +273,7 @@ function shell() {
   $(".timeline-scroll").addEventListener("pointerdown", timelinePointer);
   $(".timeline-scroll").addEventListener("keydown", timelineKey);
   $(".canvas").addEventListener("pointerdown", canvasPointer);
-  $(".graph-board").addEventListener("pointerdown", graphPointer);
+  setupBoard();
   $(".library").addEventListener("dragstart", (e) => {
     const item = e.target.closest("[data-scene]");
     if (item) e.dataTransfer.setData("text/plain", item.dataset.scene);
@@ -271,18 +302,30 @@ function render() {
   document
     .querySelectorAll("[data-page]")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-  $(".library").innerHTML =
-    `<div class="eyebrow">YOUR STORY, YOUR RULES</div><h2>剧情段落 <small>${p().scenes.length}</small></h2><p class="muted">一段视频，多次互动。<br>在地图连接不同的故事走向。</p><button class="full" data-action="add-scene">＋ 新建剧情段落</button>${p()
-      .scenes.map(
-        (x, i) =>
-          `<div class="scene-item ${x.id === selected ? "selected" : ""}" data-scene="${esc(x.id)}" draggable="true" role="button" tabindex="0"><span class="number">${String(i + 1).padStart(2, "0")}</span><div><strong>${esc(x.name)}</strong><small>${(duration(x) / 1000).toFixed(1)} 秒 · ${x.events.length} 次互动</small></div>${p().entryId === x.id ? '<span class="entry">入口</span>' : ""}</div>`,
-      )
-      .join("")}`;
-  $(".workspace-head h1").innerHTML =
-    `<span class="eyebrow">STORY WORKSPACE</span><br>${{ story: "剧情编排", assets: "素材库", loading: "加载页面", splash: "开屏动画", variables: "剧情变量" }[page]}`;
+  renderLibrary();
+  document.body.dataset.view =
+    page === "story" ? (graph ? "graph" : "scene") : "settings";
+  $(".workspace-head h1").textContent =
+    page === "story"
+      ? graph
+        ? "剧情画布"
+        : s().name
+      : {
+          assets: "素材库",
+          loading: "加载页面",
+          splash: "开屏动画",
+          variables: "剧情变量",
+          theme: "作品样式",
+        }[page];
+  if (page === "story" && graph) still.pauseMedia();
+  $(".graph-area").hidden = page !== "story" || !graph;
+  $('[data-action="graph-view"]').hidden = page !== "story" || graph;
+  $('[data-action="canvas-view"]').hidden = page !== "story" || !graph;
   $(".story-work").hidden = page !== "story" || graph;
   $(".graph-scroll").hidden = page !== "story" || !graph;
   $(".settings-page").hidden = page === "story";
+  $('[data-action="preview-current"]').textContent =
+    page === "story" ? "▷ 试玩场景" : "▷ 预览";
   $('[data-action="canvas-view"]').classList.toggle("active", !graph);
   $('[data-action="graph-view"]').classList.toggle("active", graph);
   if (page === "story") {
@@ -319,7 +362,16 @@ function paintStill() {
 function items() {
   const scene = s(),
     list = [];
-  if (scene.source === "images") {
+  if (scene.source === "sequence") {
+    for (const c of scene.clips)
+      list.push({
+        id: c.id,
+        kind: "clip",
+        start: c.startMs,
+        end: c.startMs + clipLength(c),
+        label: p().assets[c.assetId]?.name || "画面",
+      });
+  } else if (scene.source === "images") {
     let start = 0;
     for (const f of scene.images) {
       list.push({
@@ -344,8 +396,9 @@ function items() {
     ["subtitles", "subtitle"],
     ["audio", "audio"],
     ["effects", "effect"],
+    ["overlays", "overlay"],
   ])
-    for (const x of scene[key])
+    for (const x of scene[key] || [])
       list.push({
         id: x.id,
         kind,
@@ -360,7 +413,7 @@ function items() {
                 : gestures[x.gesture]
             : kind === "subtitle"
               ? x.text
-              : kind === "audio"
+              : ["audio", "overlay"].includes(kind)
                 ? p().assets[x.assetId]?.name
                 : x.kind === "speed"
                   ? `${x.value} 倍速`
@@ -372,15 +425,27 @@ function renderTimeline() {
   if (page !== "story") return;
   const d = duration(s());
   const groups = [
-    ["画面", ["video", "image"]],
+    ["画面", ["video", "image", "clip"]],
     ["互动", ["event"]],
     ["字幕", ["subtitle"]],
+    ["叠加", ["overlay"]],
     ["音频", ["audio"]],
     ["播放速度", ["effect"], "speed"],
     ["电影黑边", ["effect"], "bars"],
   ];
   $(".timeline-scroll").innerHTML =
     `<div class="timeline-inner" style="width:${zoom * 100}%"><div class="ruler">${[0, 0.25, 0.5, 0.75, 1].map((n) => `<span style="left:${n * 100}%">${((d * n) / 1000).toFixed(1)}s</span>`).join("")}</div>${groups
+      .filter(
+        ([name, kinds, effectKind]) =>
+          name === "画面" ||
+          name === "互动" ||
+          items().some(
+            (x) =>
+              kinds.includes(x.kind) &&
+              (!effectKind ||
+                s().effects.find((e) => e.id === x.id)?.kind === effectKind),
+          ),
+      )
       .map(
         ([name, kinds, effectKind]) =>
           `<div class="track"><div class="track-label">${name}</div><div class="lane">${items()
@@ -409,9 +474,35 @@ function renderInspector() {
   let html = "<h2>属性设置</h2>",
     obj = selectObject(),
     scene = s();
-  if (page !== "story") {
-    html +=
-      '<p class="muted">在中间工作区编辑当前页面。剧情段落的设置可从左侧列表打开。</p>';
+  if (page === "story" && selection.kind === "clip") {
+    html =
+      "<h2>画面片段</h2>" +
+      field("素材", "assetId", obj.assetId, {
+        options: Object.fromEntries(
+          Object.values(p().assets)
+            .filter((a) => a.kind === obj.kind)
+            .map((a) => [a.id, a.name]),
+        ),
+      }) +
+      seconds("场景开始（秒）", "startMs", obj.startMs) +
+      seconds("素材入点（秒）", "inMs", obj.inMs) +
+      seconds("素材出点（秒）", "outMs", obj.outMs) +
+      '<div class="mini-actions"><button data-action="clip-before">前移</button><button data-action="clip-after">后移</button><button data-action="split-clip">分割</button><button data-action="copy-item">复制</button><button data-action="delete-item">删除</button></div>';
+  } else if (page === "story" && selection.kind === "overlay") {
+    html =
+      "<h2>叠加图片</h2>" +
+      seconds("出现时间（秒）", "startMs", obj.startMs) +
+      seconds("结束时间（秒）", "endMs", obj.endMs) +
+      field("横向位置 %", "x", obj.x, { type: "number", min: 0, max: 100 }) +
+      field("纵向位置 %", "y", obj.y, { type: "number", min: 0, max: 100 }) +
+      field("宽度 %", "width", obj.width, {
+        type: "number",
+        min: 1,
+        max: 100,
+      }) +
+      '<button data-action="delete-item">删除图片</button>';
+  } else if (page !== "story") {
+    html += "";
   } else if (selection.kind === "scene")
     html +=
       field("段落名称", "name", scene.name) +
@@ -424,11 +515,14 @@ function renderInspector() {
       field("待配置（发布前需处理）", "pending", scene.pending, {
         type: "checkbox",
       }) +
-      `<button class="full" data-action="set-entry">设为作品入口</button><h3>播放内容</h3>` +
-      field("正式播放来源", "source", scene.source, {
-        options: { video: "视频", images: "分镜图片序列" },
+      `<h3>播放内容</h3>` +
+      field("画面来源", "source", scene.source, {
+        options:
+          scene.source === "sequence"
+            ? { sequence: "时间轴片段" }
+            : { video: "视频", images: "分镜图片序列" },
       }) +
-      `<button class="full" data-action="upload-scene">＋ 导入 / 替换视频与图片</button><button class="full" data-action="video-link">从视频直链导入</button>${scene.video ? `<button class="full" data-select-kind="video" data-select-id="${scene.video.id}">编辑视频入点 / 出点</button>` : seconds("无视频时长（秒）", "durationMs", scene.durationMs)}${targetFields("播放结束后", "next", scene.next)}<button class="full danger" data-action="delete-scene">删除当前段落</button>`;
+      `<button class="full" data-action="upload-scene">＋ 添加视频 / 图片</button><button class="full" data-action="video-link">从视频直链导入</button>${scene.video ? `<button class="full" data-select-kind="video" data-select-id="${scene.video.id}">编辑视频入点 / 出点</button>` : visualClips(scene).length ? "" : seconds("空场景时长（秒）", "durationMs", scene.durationMs)}${targetFields("播放结束后", "next", scene.next)}<button class="full danger" data-action="delete-scene">删除当前段落</button>`;
   else if (selection.kind === "video")
     html +=
       "<h3>视频片段</h3>" +
@@ -567,28 +661,111 @@ function renderInspector() {
   const issues = validate(p()).filter(
     (x) => !x.sceneId || x.sceneId === selected,
   );
-  if (issues.length)
-    html += `<div class="issues"><strong>当前检查</strong>${issues
+  const critical = issues.filter((x) => x.level === "error");
+  if (critical.length)
+    html += `<div class="issues"><strong>当前检查</strong>${critical
       .slice(0, 8)
       .map((x) => `<p>${x.level === "error" ? "●" : "△"} ${esc(x.message)}</p>`)
       .join("")}</div>`;
+  if (
+    page === "story" &&
+    ["event", "subtitle", "audio", "effect", "overlay"].includes(selection.kind)
+  )
+    html += field("跟随画面片段", "linkedClipId", obj.linkedClipId || "", {
+      options: {
+        "": "独立",
+        ...Object.fromEntries(
+          visualClips(scene).map((c) => [
+            c.id,
+            p().assets[c.assetId]?.name || "片段",
+          ]),
+        ),
+      },
+    });
+  if (page === "story" && graph && selection.kind === "scene")
+    html =
+      "<h2>场景</h2>" +
+      field("名称", "name", scene.name) +
+      field("用途", "role", scene.role, {
+        options: { story: "剧情", ending: "结局", death: "失败" },
+      }) +
+      '<div class="mini-actions"><button class="primary" data-action="enter-scene">进入编辑</button><button data-action="set-entry">设为入口</button></div>' +
+      "<h3>出口</h3>" +
+      ports(scene)
+        .map(
+          (port) =>
+            '<button class="full connection-button" data-action="edit-connection" data-path="' +
+            port.path +
+            '">' +
+            esc(port.label) +
+            " → " +
+            esc(
+              port.target.kind === "scene"
+                ? p().scenes.find((x) => x.id === port.target.sceneId)?.name ||
+                    "缺失"
+                : {
+                    end: "结束",
+                    continue: "继续",
+                    unlinked: "待连接",
+                    seek: "定位",
+                  }[port.target.kind],
+            ) +
+            "</button>",
+        )
+        .join("") +
+      '<div class="mini-actions"><button data-action="copy-scenes">复制</button><button class="danger" data-action="delete-scenes">删除</button></div>';
+  if (page === "story" && graph && critical.length)
+    html += `<div class="issues">${critical.map((x) => `<p>${esc(x.message)}</p>`).join("")}</div>`;
   $(".inspector").innerHTML = html;
+  if (page === "story" && !graph && selection.kind === "scene") {
+    const host = $(".inspector"),
+      disclosure = document.createElement("details");
+    disclosure.innerHTML = "<summary>场景显示设置</summary>";
+    for (const path of ["subtitle", "role", "clean", "grayscale", "pending"]) {
+      const field = host
+        .querySelector(`[data-field="${path}"]`)
+        ?.closest(".field");
+      if (field) disclosure.append(field);
+    }
+    host.querySelector("h2").after(disclosure);
+    const source = host.querySelector('[data-field="source"]');
+    if (source?.options.length === 1) source.closest(".field").remove();
+  }
 }
 function renderSettings() {
   const box = $(".settings-page");
+  if (page === "theme") {
+    p().theme ||= { preset: "classic", accent: "#e5d6b1", text: "#f8f0e4" };
+    const t = p().theme;
+    box.innerHTML =
+      "<h2>作品样式</h2>" +
+      field("样式", "theme.preset", t.preset, {
+        scope: "project",
+        options: { classic: "万象 · 经典", simple: "简洁" },
+      }) +
+      field("主题色", "theme.accent", t.accent, {
+        scope: "project",
+        type: "color",
+      }) +
+      field("选项文字颜色", "theme.text", t.text, {
+        scope: "project",
+        type: "color",
+      });
+    return;
+  }
   if (page === "assets") {
-    box.innerHTML = `<h2>作品素材库</h2><p class="muted">原始素材保留。点击使用，将素材放入左侧选中的剧情段落。</p><button class="primary" data-action="upload-library">＋ 导入视频 / 图片 / 音频</button>${Object.values(
+    box.innerHTML = `<h2>作品素材库</h2><button class="primary" data-action="upload-library">＋ 导入视频 / 图片 / 音频</button>${Object.values(
       p().assets,
     )
       .map(
         (a) =>
-          `<div class="asset-item"><strong>${esc(a.name)}</strong><small>${{ video: "视频", image: "图片", audio: "音频" }[a.kind]} · ${a.durationMs ? sec(a.durationMs).toFixed(2) + " 秒 · " : ""}${a.size ? (a.size / 1024 / 1024).toFixed(1) + " MB" : "内置 / 云端素材"} · ${p().scenes.filter((s) => [s.video?.assetId, ...s.images.map((f) => f.assetId), ...s.audio.map((f) => f.assetId)].includes(a.id)).length} 个段落使用</small><button data-action="use-asset" data-id="${a.id}">用于当前段落</button><button data-action="replace-asset" data-id="${a.id}">替换素材</button><button data-action="check-asset" data-id="${a.id}">检查可用性</button><button data-action="remove-asset" data-id="${a.id}">移除未使用素材</button></div>`,
+          `<div class="asset-item"><strong>${esc(a.name)}</strong><small>${{ video: "视频", image: "图片", audio: "音频" }[a.kind]} · ${a.durationMs ? sec(a.durationMs).toFixed(2) + " 秒 · " : ""}${a.size ? (a.size / 1024 / 1024).toFixed(1) + " MB" : "内置 / 云端素材"} · ${p().scenes.filter((s) => [...visualClips(s).map((c) => c.assetId), ...(s.overlays || []).map((c) => c.assetId), ...s.audio.map((f) => f.assetId)].includes(a.id)).length} 个段落使用</small><button data-action="use-asset" data-id="${esc(a.id)}">用于当前段落</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="check-asset" data-id="${esc(a.id)}">检查可用性</button><button data-action="remove-asset" data-id="${esc(a.id)}">移除未使用素材</button></div>`,
       )
       .join("")}`;
     return;
   }
   if (page === "variables") {
-    box.innerHTML = `<h2>剧情变量</h2><p class="muted">记录分数、是否获得物品等状态。互动可以按条件显示，也可以在完成后改变这些值。重新开始作品时恢复初始值。</p><button data-action="add-variable">＋ 新建变量</button>${Object.entries(
+    box.innerHTML = `<h2>剧情变量</h2><button data-action="add-variable">＋ 新建变量</button>${Object.entries(
       p().variables,
     )
       .map(
@@ -645,7 +822,7 @@ function renderSettings() {
           scope,
           options: { fade: "淡入", zoom: "缓慢放大", none: "直接显示" },
         })) +
-    `<button data-action="upload-opening">＋ 上传 / 替换背景素材</button><button data-action="preview-current">▷ 预览此页面</button><p class="muted">${page === "loading" ? "先准备开场所需素材，剧情运行时按需要读取后续内容。视频优先显示，图片可用作备用封面。" : "视频循环播放，玩家点击或按键后进入明确的开始段落。"}</p>`;
+    `<button data-action="upload-opening">＋ 上传 / 替换背景素材</button><p class="muted">${page === "loading" ? "" : "视频循环播放，玩家点击或按键后进入明确的开始段落。"}</p>`;
 }
 function ports(scene) {
   const list = [{ path: "next", label: "播放结束", target: scene.next }];
@@ -654,78 +831,36 @@ function ports(scene) {
       e.options.forEach((o, j) =>
         list.push({
           path: `events.${i}.options.${j}.target`,
-          label: o.text,
+          label: `${sec(e.startMs)}s · ${o.text}`,
           target: o.target,
         }),
       );
     else
       list.push({
         path: `events.${i}.success.target`,
-        label: `${gestures[e.gesture]} · 成功`,
+        label: `${sec(e.startMs)}s · ${gestures[e.gesture]}成功`,
         target: e.success.target,
       });
     if (e.kind !== "choice" || e.endMode !== "wait")
       list.push({
         path: `events.${i}.failure.target`,
-        label: "失败 / 超时",
+        label: `${sec(e.startMs)}s · 失败 / 超时`,
         target: e.failure.target,
       });
   });
   return list;
 }
 function renderGraph() {
-  const positions = p().editor.positions;
-  const size = {
-    width: Math.max(
-      1300,
-      ...p().scenes.map((s) => (positions[s.id]?.x || 0) + 350),
-    ),
-    height: Math.max(
-      1000,
-      ...p().scenes.map(
-        (s) => (positions[s.id]?.y || 0) + ports(s).length * 34 + 130,
-      ),
-    ),
-  };
-  let lines = "";
-  for (const scene of p().scenes) {
-    const from = positions[scene.id] || { x: 60, y: 60 };
-    ports(scene).forEach((port, i) => {
-      if (port.target.kind !== "scene") return;
-      const to = positions[port.target.sceneId];
-      if (!to) return;
-      const x1 = from.x + 255,
-        y1 = from.y + 80 + i * 34,
-        x2 = to.x,
-        y2 = to.y + 35;
-      lines += `<path d="M ${x1} ${y1} C ${x1 + 80} ${y1},${x2 - 80} ${y2},${x2} ${y2}" marker-end="url(#arrow)"/>`;
-    });
-  }
-  $(".graph-board").style.width = size.width + "px";
-  $(".graph-board").style.height = size.height + "px";
-  $(".graph-board").innerHTML =
-    `<svg class="graph-lines"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" style="fill:#a4bf7a;stroke:none"/></marker></defs>${lines}</svg>${p()
-      .scenes.map((scene) => {
-        const pos = positions[scene.id] || { x: 60, y: 60 };
-        return `<article class="graph-card ${scene.id === selected ? "selected" : ""}" data-graph-scene="${scene.id}" style="left:${pos.x}px;top:${pos.y}px"><h3>${p().entryId === scene.id ? "▷ " : ""}${esc(scene.name)}</h3><small>${scene.role === "ending" ? "结局 · " : scene.role === "death" ? "失败 · " : ""}${sec(duration(scene)).toFixed(1)} 秒 · ${scene.events.length} 次互动</small>${ports(
-          scene,
-        )
-          .map(
-            (port) =>
-              `<button data-port="${port.path}" data-from="${scene.id}" class="${linkFrom?.sceneId === scene.id && linkFrom.path === port.path ? "pending" : ""}">${esc(port.label)} → ${esc(port.target.kind === "scene" ? p().scenes.find((x) => x.id === port.target.sceneId)?.name || "目标缺失" : { continue: "继续", end: "结束作品", seek: "视频内跳转" }[port.target.kind])}</button>`,
-          )
-          .join("")}</article>`;
-      })
-      .join("")}`;
-  $(".canvas-label span").textContent =
-    "点击出口，再点击目标段落连接；也可直接拖动出口到目标。";
+  board.render(p(), selected);
 }
+
 function panel(html) {
   $(".panel-content").innerHTML = html;
   if (!$("#panel").open) $("#panel").showModal();
 }
 function closePanel() {
   $("#panel").close();
+  if (board) board.pending = null;
 }
 async function adopt(project, revision = "none", backup = true) {
   clearTimeout(saveTimer);
@@ -737,7 +872,8 @@ async function adopt(project, revision = "none", backup = true) {
   selected = project.entryId;
   selection = { kind: "scene" };
   page = "story";
-  graph = false;
+  graph = true;
+  board.selected.clear();
   time = 0;
   storage = new Storage(assets, status);
   storage.queue.revision = revision;
@@ -793,7 +929,7 @@ async function boot() {
   storage.queue.revision = revision;
   storage.saveLocal(project);
   render();
-  status("● 本机草稿已恢复");
+  status("已保存到本机");
 }
 async function preview({ full = false, here = false } = {}) {
   const errors = validate(p()).filter((x) => x.level === "error");
@@ -836,21 +972,8 @@ function download(blob, name) {
 }
 function addAssetToScene(project, scene, asset, after = null) {
   project.assets[asset.id] = asset;
-  if (asset.kind === "video") {
-    scene.video = {
-      id: uid("clip"),
-      assetId: asset.id,
-      inMs: 0,
-      outMs: asset.durationMs,
-    };
-    scene.source = "video";
-  } else if (asset.kind === "image") {
-    const f = { id: uid("image"), assetId: asset.id, durationMs: 3000 };
-    const index = after
-      ? scene.images.findIndex((x) => x.id === after) + 1
-      : scene.images.length;
-    scene.images.splice(index, 0, f);
-    scene.source = "images";
+  if (["video", "image"].includes(asset.kind)) {
+    appendVisual(scene, asset);
   } else {
     const len = Math.min(asset.durationMs || 3000, duration(scene) - time);
     if (len > 0)
@@ -879,11 +1002,6 @@ async function importFiles(files, context = { mode: "library" }) {
       files.length !== 1
     )
       throw Error("替换时请选择一个素材");
-    if (
-      context.mode === "scene" &&
-      files.filter((f) => f.type.startsWith("video/")).length > 1
-    )
-      throw Error("当前段落只支持一个主视频，请分开导入");
     for (let i = 0; i < files.length; i++) {
       status("upload", {
         name: files[i].name,
@@ -947,6 +1065,7 @@ function pick(context) {
   $("#assetFiles").click();
 }
 async function handleAction(action, button) {
+  if (await workspaceAction(action, button)) return;
   switch (action) {
     case "undo":
       history.undo();
@@ -962,15 +1081,14 @@ async function handleAction(action, button) {
       );
       break;
     case "canvas-view":
-      page = "story";
-      graph = false;
-      render();
+      enterScene(selected);
       break;
     case "graph-view":
+      rememberScene();
       page = "story";
       graph = true;
       render();
-      notify("点击一个出口，再点击目标段落建立连接");
+
       break;
     case "add-scene": {
       const scene = newScene("新的剧情段落");
@@ -992,6 +1110,9 @@ async function handleAction(action, button) {
       mutate("设置入口", (p) => (p.entryId = selected));
       break;
     case "delete-scene": {
+      await workspaceAction("delete-scenes", button);
+      break;
+
       if (p().scenes.length === 1) {
         notify("至少保留一个剧情段落");
         break;
@@ -1077,17 +1198,22 @@ async function handleAction(action, button) {
         break;
       }
       panel(
-        `<h2>选择音频</h2>${list.map((a) => `<button class="full" data-action="use-asset" data-id="${a.id}">${esc(a.name)}</button>`).join("")}<button data-action="upload-scene">＋ 导入新音频</button>`,
+        `<h2>选择音频</h2>${list.map((a) => `<button class="full" data-action="use-asset" data-id="${esc(a.id)}">${esc(a.name)}</button>`).join("")}<button data-action="upload-scene">＋ 导入新音频</button>`,
       );
       break;
     }
     case "delete-item": {
+      if (["clip", "video", "image"].includes(selection.kind)) {
+        showClipDelete();
+        break;
+      }
       const key = {
         event: "events",
         image: "images",
         subtitle: "subtitles",
         audio: "audio",
         effect: "effects",
+        overlay: "overlays",
       }[selection.kind];
       if (key) {
         const id = selection.id;
@@ -1139,6 +1265,7 @@ async function handleAction(action, button) {
       mutate("使用素材", (p) => addAssetToScene(p, s(), a));
       closePanel();
       page = "story";
+      graph = false;
       selection = { kind: "scene" };
       render();
       break;
@@ -1353,7 +1480,9 @@ async function handleAction(action, button) {
           (x) => x.level === "error",
         );
         if (errors.length) throw Error("发布版本校验失败");
-        const publicUrl = await storage.playerUrl();
+        const fixedUrl = new URL(await storage.playerUrl());
+        fixedUrl.searchParams.set("project", snapshot.id);
+        const publicUrl = fixedUrl.href;
         const url = new URL(publicUrl);
         url.searchParams.set("version", result.version);
         panel(
@@ -1371,10 +1500,10 @@ async function handleAction(action, button) {
       break;
     }
     case "versions": {
-      const list = await storage.versions();
+      const list = await storage.versions(p().id);
       let current;
       try {
-        current = (await storage.published()).version;
+        current = (await storage.published("", p().id)).version;
       } catch {}
       panel(
         `<h2>发布版本</h2><p>恢复旧发布版不会覆盖当前草稿。</p>${list.length ? list.map((v) => `<div class="version"><strong>${esc(v.name)}</strong><p>${esc(new Date(v.updatedAt).toLocaleString())}${v.version === current ? " · 当前公开版本" : ""}</p><a href="/game?version=${v.version}" target="_blank" rel="noopener">查看此版</a> <button data-action="restore-version" data-id="${v.version}">恢复为公开版本</button></div>`).join("") : "<p>尚未发布。</p>"}`,
@@ -1382,7 +1511,7 @@ async function handleAction(action, button) {
       break;
     }
     case "restore-version":
-      await storage.restore(button.dataset.id);
+      await storage.restore(button.dataset.id, p().id);
       notify("已恢复公开版本，草稿保留");
       await handleAction("versions", button);
       break;
@@ -1404,7 +1533,15 @@ async function handleAction(action, button) {
           );
         } catch {}
       panel(
-        `<h2>作品与恢复</h2><p>切换前会保留当前作品的本机备份。</p><button data-action="new-project">新建空白作品</button> <button data-action="demo">打开制作示例</button><h3>云端草稿</h3>${cloud.map((x) => `<button class="full" data-action="open-project" data-id="${x.id}">${esc(x.name)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`).join("") || "<p>连接云端后可查看。</p>"}<h3>本机恢复副本</h3>${backups.map((x) => `<button class="full" data-action="restore-backup" data-id="${esc(x.key)}">${esc(x.label)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`).join("") || "<p>尚无恢复副本。</p>"}<p><a href="legacy.html" target="_blank">打开旧版编辑器（用于旧数据检查）</a></p>`,
+        `<h2>作品与恢复</h2><p>切换前会保留当前作品的本机备份。</p><button data-action="new-project">新建空白作品</button> <button data-action="demo">打开制作示例</button><h3>云端草稿</h3>${
+          cloud
+            .filter((x) => !x.deleted)
+            .map(
+              (x) =>
+                `<button class="full" data-action="open-project" data-id="${x.id}">${esc(x.name)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`,
+            )
+            .join("") || "<p>连接云端后可查看。</p>"
+        }<h3>本机恢复副本</h3>${backups.map((x) => `<button class="full" data-action="restore-backup" data-id="${esc(x.key)}">${esc(x.label)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`).join("") || "<p>尚无恢复副本。</p>"}<p><a href="legacy.html" target="_blank">打开旧版编辑器（用于旧数据检查）</a></p>`,
       );
       break;
     }
@@ -1480,7 +1617,29 @@ function timelinePointer(e) {
       return;
     }
     mutate("调整时间轴", () => {
-      if (selection.kind === "video") {
+      if (selection.kind === "clip") {
+        if (edge === "left")
+          obj.inMs = clamp(before.inMs + delta, 0, before.outMs - 100);
+        else if (edge === "right")
+          obj.outMs = clamp(
+            before.outMs + delta,
+            before.inMs + 100,
+            obj.kind === "video"
+              ? p().assets[obj.assetId].durationMs || 7200000
+              : 7200000,
+          );
+        else {
+          let start = before.startMs + delta;
+          const snap = visualClips(s())
+            .filter((c) => c.id !== obj.id)
+            .flatMap((c) => [
+              c.startMs + clipLength(c),
+              c.startMs - clipLength(obj),
+            ])
+            .find((t) => Math.abs(start - t) <= 100);
+          moveClip(s(), obj.id, snap ?? start);
+        }
+      } else if (selection.kind === "video") {
         if (edge === "left")
           obj.inMs = clamp(before.inMs + delta, 0, before.outMs - 100);
         else if (edge === "right")
@@ -1540,7 +1699,8 @@ function timelineKey(e) {
   const obj = selectObject(),
     delta = (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 100);
   mutate("微调时间轴", () => {
-    if (selection.kind === "image")
+    if (selection.kind === "clip") moveClip(s(), obj.id, obj.startMs + delta);
+    else if (selection.kind === "image")
       obj.durationMs = Math.max(100, obj.durationMs + delta);
     else if (selection.kind === "video")
       obj.inMs = clamp(obj.inMs + delta, 0, obj.outMs - 100);
@@ -1552,13 +1712,16 @@ function timelineKey(e) {
   });
 }
 function canvasPointer(e) {
-  const el = e.target.closest("[data-edit-event]");
+  const el = e.target.closest("[data-edit-event],[data-edit-item]");
   if (!el || e.button !== 0) return;
   e.preventDefault();
   e.stopPropagation();
-  selection = { kind: "event", id: el.dataset.editEvent };
+  selection = {
+    kind: el.dataset.editKind || "event",
+    id: el.dataset.editItem || el.dataset.editEvent,
+  };
   const event = selectObject(),
-    option = event.options.find((x) => x.id === el.dataset.optionId),
+    option = event.options?.find((x) => x.id === el.dataset.optionId),
     obj = option || event,
     before = { x: obj.x, y: obj.y },
     rect = $(".canvas").getBoundingClientRect(),
@@ -1584,75 +1747,13 @@ function canvasPointer(e) {
     controller.abort();
     if (ev.type !== "pointercancel" && Math.abs(dx) + Math.abs(dy) > 0.1) {
       suppressClick = true;
-      mutate("调整互动位置", () => {
+      mutate("调整画面元素位置", () => {
         obj.x = +clamp(before.x + dx, option ? -100 : 0, 100).toFixed(1);
         obj.y = +clamp(before.y + dy, option ? -100 : 0, 100).toFixed(1);
       });
     }
     renderInspector();
     paintStill();
-  };
-  window.addEventListener("pointerup", finish, {
-    once: true,
-    signal: controller.signal,
-  });
-  window.addEventListener("pointercancel", finish, {
-    once: true,
-    signal: controller.signal,
-  });
-}
-function graphPointer(e) {
-  const card = e.target.closest("[data-graph-scene]");
-  if (!card || e.button !== 0) return;
-  const port = e.target.closest("[data-port]"),
-    sceneId = card.dataset.graphScene,
-    start = { x: e.clientX, y: e.clientY },
-    pos = p().editor.positions[sceneId] || { x: 60, y: 60 };
-  let dx = 0,
-    dy = 0;
-  const controller = new AbortController();
-  window.addEventListener(
-    "pointermove",
-    (ev) => {
-      dx = ev.clientX - start.x;
-      dy = ev.clientY - start.y;
-      if (!port) {
-        card.style.left = Math.max(0, pos.x + dx) + "px";
-        card.style.top = Math.max(0, pos.y + dy) + "px";
-      }
-    },
-    { signal: controller.signal },
-  );
-  const finish = (ev) => {
-    controller.abort();
-    if (ev.type === "pointercancel") {
-      renderGraph();
-      return;
-    }
-    if (Math.abs(dx) + Math.abs(dy) > 4) {
-      suppressClick = true;
-      if (port) {
-        const target = document
-          .elementFromPoint(ev.clientX, ev.clientY)
-          ?.closest("[data-graph-scene]")?.dataset.graphScene;
-        if (target)
-          mutate("连接剧情", (p) =>
-            set(
-              p.scenes.find((x) => x.id === sceneId),
-              port.dataset.port,
-              { kind: "scene", sceneId: target },
-            ),
-          );
-      } else
-        mutate(
-          "移动剧情卡片",
-          (p) =>
-            (p.editor.positions[sceneId] = {
-              x: Math.max(0, pos.x + dx),
-              y: Math.max(0, pos.y + dy),
-            }),
-        );
-    }
   };
   window.addEventListener("pointerup", finish, {
     once: true,
@@ -1670,12 +1771,21 @@ document.addEventListener("click", async (e) => {
   }
   const button = e.target.closest("button");
   try {
+    const device = e.target.closest("[data-preview-device]");
+    if (device) {
+      $("#preview").dataset.device = device.dataset.previewDevice;
+      return;
+    }
+    if (e.target.closest(".graph-scroll")) return;
     if (button?.dataset.action) {
+      button.closest("details")?.removeAttribute("open");
       await handleAction(button.dataset.action, button);
       return;
     }
     if (button?.dataset.page) {
+      if (page === "story" && !graph) rememberScene();
       page = button.dataset.page;
+      if (page === "story") graph = true;
       render();
       return;
     }
@@ -1696,33 +1806,15 @@ document.addEventListener("click", async (e) => {
       notify("点击目标段落完成连接");
       return;
     }
-    const card = e.target.closest("[data-graph-scene]");
-    if (card) {
-      const id = card.dataset.graphScene;
-      if (linkFrom) {
-        const from = linkFrom;
-        linkFrom = null;
-        mutate("连接剧情", (p) =>
-          set(
-            p.scenes.find((x) => x.id === from.sceneId),
-            from.path,
-            { kind: "scene", sceneId: id },
-          ),
-        );
-      }
-      selected = id;
-      selection = { kind: "scene" };
-      renderInspector();
-      renderGraph();
-      return;
-    }
     const item = e.target.closest("[data-scene]");
     if (item) {
-      selected = item.dataset.scene;
-      selection = { kind: "scene" };
-      page = "story";
-      time = 0;
-      render();
+      if (graph) {
+        selected = item.dataset.scene;
+        board.selected = new Set([selected]);
+        selection = { kind: "scene" };
+        render();
+        board.locate(selected);
+      } else enterScene(item.dataset.scene);
     }
   } catch (error) {
     notify(error.message);
@@ -1755,40 +1847,70 @@ document.addEventListener("change", (e) => {
     notify("请输入有效数值");
     return;
   }
-  mutate("修改属性", () => {
-    set(obj, path, value);
-    if (path.endsWith(".target.kind") || path === "next.kind") {
-      const base = path.slice(0, -5);
-      set(
-        obj,
-        base,
-        value === "scene"
-          ? { kind: value, sceneId: p().entryId }
-          : value === "seek"
-            ? { kind: value, timeMs: 0 }
-            : { kind: value },
-      );
-    }
-    if (path.endsWith(".variable")) {
-      const base = path.slice(0, -9);
-      set(obj, base + ".value", p().variables[value]);
-      if (
-        get(obj, base + ".op") === "add" &&
-        typeof p().variables[value] !== "number"
-      )
-        set(obj, base + ".op", "set");
-    }
-    if (selection.kind === "event" && scope === "selection") {
-      if (path === "kind" && value === "choice" && !obj.options.length)
-        obj.options = newEvent(0, "choice").options;
-      if (path === "endMode" && value === "range") obj.pause = false;
-    }
-    if (selection.kind === "effect" && path === "kind")
-      obj.value = value === "speed" ? 0.5 : 6;
-  });
+  try {
+    mutate("修改属性", () => {
+      if (selection.kind === "clip" && path === "startMs") {
+        moveClip(s(), obj.id, value);
+        return;
+      }
+      set(obj, path, value);
+      if (path.endsWith(".target.kind") || path === "next.kind") {
+        const base = path.slice(0, -5);
+        set(
+          obj,
+          base,
+          value === "scene"
+            ? { kind: value, sceneId: p().entryId }
+            : value === "seek"
+              ? { kind: value, timeMs: 0 }
+              : { kind: value },
+        );
+      }
+      if (path.endsWith(".variable")) {
+        const base = path.slice(0, -9);
+        set(obj, base + ".value", p().variables[value]);
+        if (
+          get(obj, base + ".op") === "add" &&
+          typeof p().variables[value] !== "number"
+        )
+          set(obj, base + ".op", "set");
+      }
+      if (selection.kind === "event" && scope === "selection") {
+        if (path === "kind" && value === "choice" && !obj.options.length)
+          obj.options = newEvent(0, "choice").options;
+        if (path === "endMode" && value === "range") obj.pause = false;
+      }
+      if (selection.kind === "effect" && path === "kind")
+        obj.value = value === "speed" ? 0.5 : 6;
+    });
+  } catch {
+    render();
+  }
 });
 document.addEventListener("keydown", (e) => {
   if ($("#preview").open) return;
+  if (
+    !e.target.matches("input,textarea,select,[contenteditable]") &&
+    !$("#panel").open &&
+    graph &&
+    page === "story"
+  ) {
+    if (e.key === "Delete") {
+      e.preventDefault();
+      workspaceAction("delete-scenes").catch((x) => notify(x.message));
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      workspaceAction("copy-scenes").catch((x) => notify(x.message));
+      return;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      enterScene(selected);
+      return;
+    }
+  }
   const editing = e.target.matches("input,textarea,select,[contenteditable]");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
@@ -1848,3 +1970,561 @@ boot().catch((error) => {
   $("#studio").innerHTML =
     `<div class="boot"><h2>工作台暂时无法打开</h2><p>${esc(error.message)}</p><p>原草稿未删除。请刷新重试，或使用旧版编辑器导出备份。</p><a href="legacy.html">打开旧版编辑器</a></div>`;
 });
+
+function rememberScene() {
+  sceneViews.set(selected, { time, zoom, selection: clone(selection) });
+}
+function enterScene(id) {
+  if (!graph) rememberScene();
+  selected = id;
+  const view = sceneViews.get(id);
+  time = view?.time || 0;
+  zoom = view?.zoom || 1.5;
+  selection = view?.selection || { kind: "scene" };
+  page = "story";
+  graph = false;
+  render();
+  $("#zoom").value = zoom;
+}
+function setupBoard() {
+  board = new StoryBoard($(".graph-scroll"), {
+    ports,
+    assetUrl: (a) => assets.url(a),
+    mini: () => $(".minimap"),
+    zoom: (n) => ($("#graph-scale").textContent = Math.round(n * 100) + "%"),
+    selection: (n) => ($(".selection-tools").hidden = !n),
+    select: (id) => {
+      selected = id;
+      selection = { kind: "scene" };
+      renderInspector();
+      board.highlight();
+    },
+    open: enterScene,
+    move: (list) =>
+      mutate("移动场景", (p) =>
+        list.forEach((x) => (p.editor.positions[x.id] = { x: x.x, y: x.y })),
+      ),
+    menu: (id) => {
+      selected = id;
+      panel(
+        `<h2>${esc(s().name)}</h2><label class="field">名称<input id="rename-scene" value="${esc(s().name)}"></label><div class="mini-actions"><button data-action="rename-scene">重命名</button><button data-action="enter-scene">进入编辑</button><button data-action="copy-scenes">复制</button><button data-action="set-entry">设为入口</button><button data-action="make-ending">设为结局</button><button class="danger" data-action="delete-scenes">删除</button></div>`,
+      );
+    },
+    create: () => workspaceAction("new-card"),
+    connection: (id, path) => showConnection(id, path),
+    connect: (id, path, target) =>
+      mutate("连接剧情", (p) =>
+        set(
+          p.scenes.find((s) => s.id === id),
+          path,
+          { kind: "scene", sceneId: target },
+        ),
+      ),
+    drop: async (transfer) => {
+      const aid = transfer.getData("application/storyforge-asset");
+      if (aid) {
+        const scene = createScene(p().assets[aid].name);
+        mutate("素材创建场景", (p) => addAssetToScene(p, scene, p.assets[aid]));
+        return;
+      }
+      if (transfer.files.length) {
+        const scene = createScene("新场景");
+        await importFiles([...transfer.files], {
+          mode: "scene",
+          sceneId: scene.id,
+        });
+      }
+    },
+  });
+  $(".library").addEventListener("input", (e) => {
+    if (e.target.id === "scene-search") {
+      sceneSearch = e.target.value;
+      for (const el of $(".library").querySelectorAll("[data-scene]"))
+        el.hidden = !el.textContent
+          .toLowerCase()
+          .includes(sceneSearch.toLowerCase());
+    }
+    if (e.target.id === "asset-search") {
+      assetSearch = e.target.value;
+      for (const el of $(".library").querySelectorAll("[data-drag-asset]"))
+        el.hidden = !el.textContent
+          .toLowerCase()
+          .includes(assetSearch.toLowerCase());
+    }
+  });
+  $(".library").addEventListener("dragstart", (e) => {
+    const el = e.target.closest("[data-drag-asset]");
+    if (el)
+      e.dataTransfer.setData(
+        "application/storyforge-asset",
+        el.dataset.dragAsset,
+      );
+  });
+  $(".timeline-scroll").addEventListener("dragover", (e) => e.preventDefault());
+  $(".timeline-scroll").addEventListener("drop", (e) => {
+    e.preventDefault();
+    const aid = e.dataTransfer.getData("application/storyforge-asset");
+    if (aid) mutate("添加片段", (p) => addAssetToScene(p, s(), p.assets[aid]));
+    else if (e.dataTransfer.files.length)
+      importFiles([...e.dataTransfer.files], {
+        mode: "scene",
+        sceneId: selected,
+      });
+  });
+  $(".canvas").addEventListener("drop", (e) => {
+    const aid = e.dataTransfer.getData("application/storyforge-asset");
+    if (aid) mutate("添加片段", (p) => addAssetToScene(p, s(), p.assets[aid]));
+  });
+}
+function renderLibrary() {
+  if (page === "story" && !graph) {
+    $(".library").innerHTML =
+      `<div class="sidebar-title">素材<button data-action="upload-library" title="导入素材">＋</button></div><input id="asset-search" placeholder="搜索素材" value="${esc(assetSearch)}"><div class="asset-grid">${Object.values(
+        p().assets,
+      )
+        .filter((a) => a.name.toLowerCase().includes(assetSearch.toLowerCase()))
+        .map(
+          (a) =>
+            `<div class="asset-tile" draggable="true" data-drag-asset="${esc(a.id)}"><div class="asset-symbol">${{ video: "▷", image: "▧", audio: "♫" }[a.kind]}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${a.durationMs ? sec(a.durationMs).toFixed(1) + "s" : { image: "图片", audio: "音频", video: "视频" }[a.kind]}</small><button data-action="use-asset" data-id="${esc(a.id)}" title="添加到场景">＋</button></div>`,
+        )
+        .join("")}</div>`;
+    return;
+  }
+  $(".library").innerHTML =
+    `<div class="sidebar-title">场景 <small>${p().scenes.length}</small></div><input id="scene-search" placeholder="搜索场景" value="${esc(sceneSearch)}">${p()
+      .scenes.filter((x) =>
+        x.name.toLowerCase().includes(sceneSearch.toLowerCase()),
+      )
+      .map(
+        (x, i) =>
+          `<div class="scene-item ${x.id === selected ? "selected" : ""}" data-scene="${x.id}" draggable="true" role="button" tabindex="0"><span class="number">${String(i + 1).padStart(2, "0")}</span><div><strong>${esc(x.name)}</strong><small>${sec(duration(x)).toFixed(1)}s${p().entryId === x.id ? " · 入口" : ""}${x.role === "ending" ? " · 结局" : ""}</small></div></div>`,
+      )
+      .join("")}`;
+}
+function createScene(name = "新场景", role = "story", source = "sequence") {
+  const scene = newScene(name);
+  scene.source = source;
+  scene.clips = [];
+  scene.role = role;
+  scene.next = role === "ending" ? endTarget() : { kind: "unlinked" };
+  mutate("新建场景", (p) => {
+    p.scenes.push(scene);
+    p.editor.positions[scene.id] = {
+      x: Math.round($(".graph-scroll").scrollLeft / (board.scale || 1) + 80),
+      y: Math.round($(".graph-scroll").scrollTop / (board.scale || 1) + 80),
+    };
+  });
+  const addedPos = p().editor.positions[scene.id];
+  while (
+    p().scenes.some(
+      (x) =>
+        x.id !== scene.id &&
+        Math.abs((p().editor.positions[x.id]?.x || 0) - addedPos.x) < 290 &&
+        Math.abs((p().editor.positions[x.id]?.y || 0) - addedPos.y) < 320,
+    )
+  )
+    addedPos.y += 340;
+  storage.saveLocal(p());
+  selected = scene.id;
+  board.selected = new Set([selected]);
+  selection = { kind: "scene" };
+  graph = true;
+  page = "story";
+  render();
+  board.locate(scene.id);
+  return scene;
+}
+function showConnection(id, path) {
+  connectionEdit = { id, path };
+  const scene = p().scenes.find((s) => s.id === id),
+    t = get(scene, path),
+    port = ports(scene).find((x) => x.path === path);
+  panel(
+    `<h2>${esc(port?.label || "剧情连接")}</h2><label class="field">下一场景<select id="connection-target"><option value="unlinked">待连接</option><option value="end">结束作品</option><option value="continue">继续播放</option>${p()
+      .scenes.map(
+        (x) =>
+          `<option value="${x.id}" ${t.sceneId === x.id ? "selected" : ""}>${esc(x.name)}</option>`,
+      )
+      .join(
+        "",
+      )}</select></label><button class="primary" data-action="save-connection">确定</button> <button data-action="create-connected">新建并连接场景</button> <button data-action="unlink">移除连接</button>`,
+  );
+  if (t.kind !== "scene")
+    $("#connection-target").value = t.kind === "seek" ? "continue" : t.kind;
+}
+function currentClip() {
+  if (selection.kind === "clip") return selectObject();
+  const id = selection.id;
+  const c = visualClips(s()).find((c) => c.id === id) || mediaAt(s(), time);
+  if (c) selection = { kind: "clip", id: c.id };
+  return c;
+}
+function showClipDelete() {
+  const c = currentClip();
+  if (!c) {
+    notify("请选择片段");
+    return;
+  }
+  panel(
+    `<h2>删除片段</h2><label class="field">后续内容<select id="delete-ripple"><option value="no">保留空位</option><option value="yes">一起前移</option></select></label>${linked(s(), c.id).length ? '<label class="field check"><input id="delete-linked" type="checkbox" checked>同时删除关联字幕、互动和声音</label>' : ""}<button class="danger" data-action="confirm-delete-clip">删除片段</button>`,
+  );
+}
+function archiveList() {
+  try {
+    return JSON.parse(localStorage.getItem("storyforge-projects") || "{}");
+  } catch {
+    return {};
+  }
+}
+function saveArchive(list) {
+  localStorage.setItem("storyforge-projects", JSON.stringify(list));
+}
+async function showProjects() {
+  const local = archiveList(),
+    backups = storage.backups();
+  let cloud = [];
+  if (storage.token)
+    try {
+      cloud = await response(
+        await fetch("/api/v2/projects", { headers: storage.headers() }),
+      );
+    } catch {}
+  panel(
+    `<h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 空白作品</button><button data-action="demo">使用示例</button><button data-action="copy-project">复制当前作品</button><button data-action="import">导入作品</button></div><div class="project-grid">${Object.values(
+      local,
+    )
+      .filter((x) => !x.deleted)
+      .map(
+        (x) =>
+          `<div class="project-card"><div class="project-icon">▣</div><h3>${esc(x.project.name)}</h3><small>${x.project.scenes.length} 个场景</small><div class="mini-actions"><button data-action="open-local" data-id="${x.project.id}">打开</button><button data-action="trash-project" data-id="${x.project.id}">移入回收站</button></div></div>`,
+      )
+      .join("")}</div>${
+      cloud.length
+        ? `<details><summary>云端作品</summary>${cloud
+            .filter((x) => !x.deleted)
+            .map(
+              (x) =>
+                `<button class="full" data-action="open-project" data-id="${x.id}">${esc(x.name)}</button><button data-action="archive-cloud" data-id="${x.id}">移入回收站</button>`,
+            )
+            .join("")}</details>`
+        : ""
+    }<details><summary>回收站与恢复</summary>${cloud
+      .filter((x) => x.deleted)
+      .map(
+        (x) =>
+          `<button class="full" data-action="restore-cloud" data-id="${x.id}">恢复云端作品 ${esc(x.name)}</button>`,
+      )
+      .join("")}${Object.values(local)
+      .filter((x) => x.deleted)
+      .map(
+        (x) =>
+          `<button class="full" data-action="restore-project" data-id="${x.project.id}">恢复 ${esc(x.project.name)}</button>`,
+      )
+      .join(
+        "",
+      )}${backups.map((x) => `<button class="full" data-action="restore-backup" data-id="${esc(x.key)}">${esc(x.label)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`).join("")}</details>`,
+  );
+}
+async function workspaceAction(action, button = { dataset: {} }) {
+  const ids = () => (board.selected.size ? [...board.selected] : [selected]);
+  switch (action) {
+    case "archive-cloud":
+      await response(
+        await fetch("/api/v2/archive", {
+          method: "POST",
+          headers: storage.headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ id: button.dataset.id, deleted: true }),
+        }),
+      );
+      await showProjects();
+      break;
+    case "restore-cloud":
+      await response(
+        await fetch("/api/v2/archive", {
+          method: "POST",
+          headers: storage.headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ id: button.dataset.id, deleted: false }),
+        }),
+      );
+      await showProjects();
+      break;
+    case "projects":
+      await showProjects();
+      break;
+    case "open-local": {
+      const x = archiveList()[button.dataset.id];
+      await adopt(migrate(x.project), x.revision || "none");
+      closePanel();
+      break;
+    }
+    case "copy-project": {
+      const copy = clone(p());
+      copy.id = uid("project");
+      copy.name += " 副本";
+      await adopt(copy);
+      closePanel();
+      break;
+    }
+    case "trash-project": {
+      const list = archiveList(),
+        id = button.dataset.id;
+      list[id].deleted = true;
+      saveArchive(list);
+      if (id === p().id) await adopt(newProject());
+      await showProjects();
+      break;
+    }
+    case "restore-project": {
+      const list = archiveList();
+      list[button.dataset.id].deleted = false;
+      saveArchive(list);
+      await showProjects();
+      break;
+    }
+    case "new-card":
+      panel(
+        '<h2>新建场景</h2><label class="field">名称<input id="new-scene-name" placeholder="场景名称" value="新场景"></label><label class="field">类型<select id="new-scene-type"><option value="story">空白场景</option><option value="video">视频场景</option><option value="image">图片场景</option><option value="ending">结局</option></select></label><button class="primary" data-action="create-card">创建</button>',
+      );
+      break;
+    case "create-card": {
+      const type = $("#new-scene-type").value,
+        name = $("#new-scene-name").value.trim() || "新场景";
+      const scene = createScene(name, type === "ending" ? "ending" : "story");
+      closePanel();
+      if (["video", "image"].includes(type))
+        pick({ mode: "scene", sceneId: scene.id });
+      break;
+    }
+    case "enter-scene":
+      closePanel();
+      enterScene(selected);
+      break;
+    case "rename-scene":
+      mutate(
+        "重命名场景",
+        () => (s().name = $("#rename-scene").value.trim() || s().name),
+      );
+      closePanel();
+      break;
+    case "make-ending":
+      mutate("设为结局", () => {
+        s().role = "ending";
+        s().next = endTarget();
+      });
+      closePanel();
+      break;
+    case "copy-scenes": {
+      let copied;
+      mutate("复制场景", (p) => (copied = copyScenes(p, ids())));
+      selected = copied[0].id;
+      board.selected = new Set(copied.map((s) => s.id));
+      closePanel();
+      render();
+      break;
+    }
+    case "delete-scenes": {
+      pendingDelete = ids();
+      const keep = p().scenes.filter((s) => !pendingDelete.includes(s.id));
+      if (!keep.length) throw Error("至少保留一个场景");
+      const inbound = p().scenes.filter(
+        (s) =>
+          !pendingDelete.includes(s.id) &&
+          targetsOf(s).some(
+            (t) => t.kind === "scene" && pendingDelete.includes(t.sceneId),
+          ),
+      );
+      panel(
+        `<h2>删除 ${pendingDelete.length} 个场景？</h2><p>${inbound.length ? "关联场景：" + inbound.map((x) => esc(x.name)).join("、") + "。相关出口将标记为待连接。" : "删除后可以撤销，素材仍保留。"}</p>${pendingDelete.includes(p().entryId) ? `<label class="field">新的故事入口<select id="new-entry">${keep.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></label>` : ""}<button class="danger" data-action="confirm-delete-scenes">删除场景</button>`,
+      );
+      break;
+    }
+    case "confirm-delete-scenes": {
+      const entry = $("#new-entry")?.value || p().entryId;
+      mutate("删除场景", (p) => deleteScenes(p, pendingDelete, entry));
+      selected = p().entryId;
+      board.selected = new Set([selected]);
+      closePanel();
+      render();
+      break;
+    }
+    case "save-connection": {
+      const value = $("#connection-target").value;
+      mutate("修改连接", (p) =>
+        set(
+          p.scenes.find((x) => x.id === connectionEdit.id),
+          connectionEdit.path,
+          ["unlinked", "end", "continue"].includes(value)
+            ? { kind: value }
+            : { kind: "scene", sceneId: value },
+        ),
+      );
+      board.pending = null;
+      closePanel();
+      break;
+    }
+    case "unlink":
+      mutate("移除连接", (p) =>
+        set(
+          p.scenes.find((x) => x.id === connectionEdit.id),
+          connectionEdit.path,
+          { kind: "unlinked" },
+        ),
+      );
+      board.pending = null;
+      closePanel();
+      break;
+    case "create-connected": {
+      const from = connectionEdit,
+        scene = createScene("新场景");
+      mutate("连接新场景", (p) =>
+        set(
+          p.scenes.find((x) => x.id === from.id),
+          from.path,
+          { kind: "scene", sceneId: scene.id },
+        ),
+      );
+      board.pending = null;
+      closePanel();
+      break;
+    }
+    case "zoom-in":
+      board.zoom(1.2);
+      break;
+    case "zoom-out":
+      board.zoom(1 / 1.2);
+      break;
+    case "fit-graph":
+      board.fit();
+      break;
+    case "locate-entry":
+      board.locate(p().entryId);
+      break;
+    case "pan-mode":
+      board.mode = "pan";
+      button.classList.add("active");
+      $('[data-action="select-mode"]').classList.remove("active");
+      break;
+    case "select-mode":
+      board.mode = "select";
+      button.classList.add("active");
+      $('[data-action="pan-mode"]').classList.remove("active");
+      break;
+    case "arrange-graph":
+      mutate("整理画布", (p) =>
+        p.scenes.forEach(
+          (s, i) =>
+            (p.editor.positions[s.id] = {
+              x: 70 + (i % 3) * 340,
+              y:
+                60 +
+                Math.floor(i / 3) *
+                  Math.max(
+                    340,
+                    ...p.scenes.map((s) => 210 + ports(s).length * 34),
+                  ),
+            }),
+        ),
+      );
+      board.fit();
+      break;
+    case "split-clip": {
+      let next;
+      mutate("分割片段", () => {
+        const c = currentClip();
+        if (!c) throw Error("请选择片段");
+        next = splitClip(s(), c.id, time);
+      });
+      selection = { kind: "clip", id: next.id };
+      render();
+      break;
+    }
+    case "clip-before":
+    case "clip-after":
+      mutate("调整片段顺序", () =>
+        reorderClip(s(), currentClip().id, action === "clip-before" ? -1 : 1),
+      );
+      break;
+    case "copy-item": {
+      let copy;
+      if (["clip", "video", "image"].includes(selection.kind)) {
+        mutate("复制片段", () => (copy = duplicateClip(s(), currentClip().id)));
+        selection = { kind: "clip", id: copy.id };
+      } else {
+        const key = {
+          event: "events",
+          subtitle: "subtitles",
+          audio: "audio",
+          effect: "effects",
+          overlay: "overlays",
+        }[selection.kind];
+        if (!key) throw Error("请选择要复制的内容");
+        mutate("复制内容", () => {
+          copy = clone(selectObject());
+          copy.id = uid("item");
+          copy.options?.forEach((o) => (o.id = uid("option")));
+          s()[key].push(copy);
+        });
+        selection.id = copy.id;
+      }
+      render();
+      break;
+    }
+    case "confirm-delete-clip": {
+      const ripple = $("#delete-ripple").value === "yes",
+        linkedDelete = $("#delete-linked")?.checked || false;
+      mutate("删除片段", () =>
+        removeClip(s(), currentClip().id, ripple, linkedDelete),
+      );
+      selection = { kind: "scene" };
+      closePanel();
+      render();
+      break;
+    }
+    case "add-overlay": {
+      const list = Object.values(p().assets).filter((x) => x.kind === "image");
+      panel(
+        `<h2>叠加图片</h2>${list.map((a) => `<button class="full" data-action="use-overlay" data-id="${esc(a.id)}">${esc(a.name)}</button>`).join("") || "<p>请先导入图片素材。</p>"}<button data-action="upload-library">导入图片</button>`,
+      );
+      break;
+    }
+    case "use-overlay": {
+      const x = {
+        id: uid("overlay"),
+        assetId: button.dataset.id,
+        startMs: Math.min(time, duration(s()) - 100),
+        endMs: Math.min(duration(s()), time + 3000),
+        x: 50,
+        y: 50,
+        width: 30,
+      };
+      mutate("添加叠加图片", () => {
+        s().overlays ||= [];
+        s().overlays.push(x);
+      });
+      selection = { kind: "overlay", id: x.id };
+      closePanel();
+      render();
+      break;
+    }
+    case "edit-connection":
+      showConnection(selected, button.dataset.path);
+      break;
+    case "check-project":
+      showIssues(false);
+      break;
+    case "help":
+      panel(
+        "<h2>快捷操作</h2><p>双击场景进入编辑；拖动空白处移动画布；按住 Shift 拖动可框选。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴拖动片段或两端调整时间，方向键微调 0.1 秒。</p>",
+      );
+      break;
+    case "preview-desktop":
+    case "preview-portrait":
+    case "preview-landscape":
+      $("#preview").dataset.device = action.slice(8);
+      await preview();
+      break;
+    default:
+      return false;
+  }
+  return true;
+}

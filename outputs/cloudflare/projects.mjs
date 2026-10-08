@@ -46,14 +46,28 @@ export class Projects {
         401,
       );
     try {
+      const projectId = url.searchParams.get("id");
+      if (projectId && !safeId(projectId))
+        return reply({ error: "作品编号无效" }, 400);
+      const latestKey = projectId ? `latest/${projectId}` : "latest";
       if (publicRead) {
         const key =
-          path === "/published" ? "latest" : `release/${path.split("/").pop()}`;
-        const release = await this.json(key);
+          path === "/published"
+            ? latestKey
+            : `release/${path.split("/").pop()}`;
+        let release = await this.json(key);
+        if (!release && projectId && path === "/published") {
+          const old = await this.json("latest");
+          if (old?.projectId === projectId) release = old;
+        }
         return release ? reply(release) : reply({ error: "作品尚未发布" }, 404);
       }
       if (path === "/versions" && request.method === "GET")
-        return reply((await this.json("versions")) || []);
+        return reply(
+          ((await this.json("versions")) || []).filter(
+            (x) => !projectId || x.projectId === projectId,
+          ),
+        );
       if (path === "/projects" && request.method === "GET")
         return reply((await this.json("projects")) || []);
       if (path === "/draft" && request.method === "GET") {
@@ -68,21 +82,40 @@ export class Projects {
       if (raw.length > 4 * 1024 * 1024)
         return reply({ error: "项目数据超过 4 MB" }, 413);
       const body = JSON.parse(raw);
+      if (path === "/archive") {
+        if (!safeId(body.id) || typeof body.deleted !== "boolean")
+          return reply({ error: "请求无效" }, 400);
+        const index = (await this.json("projects")) || [],
+          item = index.find((x) => x.id === body.id);
+        if (!item) return reply({ error: "作品不存在" }, 404);
+        item.deleted = body.deleted;
+        await this.storage.put("projects", JSON.stringify(index));
+        return reply({ ok: true });
+      }
       if (path === "/restore") {
         if (!safeId(body.version)) return reply({ error: "版本编号无效" }, 400);
-        const current = await this.json("latest");
+        const current = await this.json(latestKey);
         if ((current?.version || "none") !== request.headers.get("If-Match"))
           return reply({ error: "发布版本已改变，请刷新版本列表" }, 409);
         const release = await this.json(`release/${body.version}`);
-        if (!release) return reply({ error: "版本不存在" }, 404);
+        if (!release || (projectId && release.projectId !== projectId))
+          return reply({ error: "版本不存在" }, 404);
         const issues = await this.checkMedia(release.project);
         if (issues) return reply({ error: issues }, 400);
-        await this.storage.put("latest", JSON.stringify(release));
+        await this.storage.put(latestKey, JSON.stringify(release));
+        await this.storage.put(
+          `latest/${release.projectId}`,
+          JSON.stringify(release),
+        );
+        if (projectId && (await this.json("latest"))?.projectId === projectId)
+          await this.storage.put("latest", JSON.stringify(release));
         return reply({ ok: true, version: release.version });
       }
       if (!["/draft", "/publish"].includes(path))
         return reply({ error: "接口不存在" }, 404);
       const project = body.project;
+      if (projectId && project?.id !== projectId)
+        return reply({ error: "作品编号不匹配" }, 400);
       let issues;
       try {
         issues = validate(project, { publish: path === "/publish" });
@@ -129,7 +162,11 @@ export class Projects {
         await this.storage.put("projects", JSON.stringify(index));
         return reply({ revision: rev, updatedAt: draft.updatedAt });
       }
-      const latest = await this.json("latest");
+      let latest = await this.json(latestKey);
+      if (!latest && projectId) {
+        const old = await this.json("latest");
+        if (old?.projectId === projectId) latest = old;
+      }
       if ((latest?.version || "none") !== request.headers.get("If-Match"))
         return reply(
           { error: "另一窗口已发布新版，请检查版本列表后重试" },
@@ -162,7 +199,14 @@ export class Projects {
       );
       await this.storage.put("versions", JSON.stringify(list));
       // The pointer is changed only after all immutable data is durable.
-      await this.storage.put("latest", JSON.stringify(release));
+      await this.storage.put(latestKey, JSON.stringify(release));
+      await this.storage.put(`latest/${project.id}`, JSON.stringify(release));
+      if (
+        projectId &&
+        ((await this.json("latest"))?.projectId === project.id ||
+          project.id === "legacy-wanxiang")
+      )
+        await this.storage.put("latest", JSON.stringify(release));
       return reply({
         version: release.version,
         updatedAt: release.updatedAt,

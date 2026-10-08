@@ -1,3 +1,4 @@
+import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
 import { duration, clamp, gestures } from "./model.mjs";
 import { esc } from "./storage.mjs";
@@ -61,8 +62,12 @@ export class PlayerView {
         this.runtime?.resolve(true, choice.dataset.optionId);
       const hot = e.target.closest("[data-hotspot]");
       if (hot && !this.editing) this.runtime?.resolve(true);
-      const select = e.target.closest("[data-edit-event]");
-      if (select && this.editing) this.onSelect(select.dataset.editEvent);
+      const select = e.target.closest("[data-edit-event],[data-edit-item]");
+      if (select && this.editing)
+        this.onSelect(
+          select.dataset.editEvent || select.dataset.editItem,
+          select.dataset.editKind || "event",
+        );
     };
     root.addEventListener("click", this.clickHandler);
     this.down = (e) => {
@@ -137,6 +142,7 @@ export class PlayerView {
   async start(project, sceneId = project.entryId, time = 0) {
     this.stop();
     this.project = project;
+    this.applyTheme(project);
     this.runtime = new Runtime(project, (event, runtime) =>
       this.update(event, runtime),
     );
@@ -149,6 +155,7 @@ export class PlayerView {
     this.runtime = null;
     this.cleanupMedia();
     this.hud.innerHTML = "";
+    delete this.hud.dataset.key;
     this.message.hidden = true;
     this.eventId = null;
   }
@@ -185,24 +192,42 @@ export class PlayerView {
     window.removeEventListener("blur", this.blur);
     document.removeEventListener("visibilitychange", this.visibility);
   }
+  applyTheme(project) {
+    const theme = project.theme || {
+      preset: "classic",
+      accent: "#e5d6b1",
+      text: "#f8f0e4",
+    };
+    this.root.classList.toggle("simple-theme", theme.preset === "simple");
+    this.root.style.setProperty("--work-accent", theme.accent);
+    this.root.style.setProperty("--work-text", theme.text);
+  }
   async renderStill(project, scene, time = 0, focusEvent = null) {
     this.project = project;
+    this.applyTheme(project);
     this.still = { scene, time, focusEvent };
     if (
       this.stillId !== scene.id ||
       this.stillSource !==
-        JSON.stringify([scene.source, scene.video, scene.images])
+        JSON.stringify([scene.source, scene.video, scene.images, scene.clips])
     ) {
       this.stillId = scene.id;
       this.stillSource = JSON.stringify([
         scene.source,
         scene.video,
         scene.images,
+        scene.clips,
       ]);
       await this.mount(scene, time);
     }
+    if (
+      scene.source === "sequence" &&
+      this.mountedClipId !== (mediaAt(scene, time)?.id || "gap")
+    )
+      await this.mount(scene, time);
     if (this.video && Number.isFinite(this.video.duration)) {
-      const wanted = (scene.video.inMs + time) / 1000;
+      const wanted =
+        (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
       if (Math.abs(this.video.currentTime - wanted) > 0.03)
         this.video.currentTime = Math.min(wanted, this.video.duration);
       this.video.pause();
@@ -219,6 +244,9 @@ export class PlayerView {
   }
   async mount(scene, time = 0) {
     const token = ++this.token;
+    const current = mediaAt(scene, time);
+    this.currentClip = current;
+    this.mountedClipId = current?.id || "gap";
     this.cleanupMedia();
     this.visual.innerHTML = "";
     this.message.hidden = true;
@@ -229,16 +257,14 @@ export class PlayerView {
     this.stage.classList.toggle("grayscale", scene.grayscale);
     this.stage.classList.toggle("death", scene.role === "death");
     try {
-      if (scene.source === "video" && scene.video) {
+      if (current?.kind === "video") {
         const v = document.createElement("video");
         v.playsInline = true;
         v.preload = "auto";
         v.muted = this.muted;
         this.video = v;
         this.visual.append(v);
-        const url = await this.assets.url(
-          this.project.assets[scene.video.assetId],
-        );
+        const url = await this.assets.url(this.project.assets[current.assetId]);
         if (token !== this.token) return;
         await new Promise((resolve, reject) => {
           let timer;
@@ -263,9 +289,10 @@ export class PlayerView {
           v.load();
         });
         if (token !== this.token) return;
-        if (scene.video.outMs > v.duration * 1000 + 100)
+        if (current.outMs > v.duration * 1000 + 100)
           throw Error("视频时长短于段落设置，请检查素材与出点");
-        v.currentTime = (scene.video.inMs + time) / 1000;
+        v.currentTime =
+          (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
         v.onerror = () => {
           if (token === this.token)
             this.showError("视频播放中断，请重新加载当前段落");
@@ -286,14 +313,19 @@ export class PlayerView {
         v.onended = () => {
           this.buffering = false;
         };
-      } else if (scene.source === "images") {
+      } else if (current?.kind === "image") {
         const img = new Image();
         img.alt = scene.name;
         this.visual.append(img);
         this.image = img;
-        await this.paintImage(scene, time, token);
+        if (scene.source === "sequence")
+          img.src = await this.assets.url(this.project.assets[current.assetId]);
+        else await this.paintImage(scene, time, token);
       } else {
-        this.visual.innerHTML = '<div class="scenery"><div></div></div>';
+        this.visual.innerHTML =
+          scene.source === "sequence"
+            ? ""
+            : '<div class="scenery"><div></div></div>';
       }
       if (token !== this.token) return;
       for (const clip of scene.audio) {
@@ -316,6 +348,7 @@ export class PlayerView {
       this.buffering = false;
       this.message.hidden = true;
       this.paintScene(scene, time);
+      if (!this.editing) this.paintEvent(this.runtime?.active?.event);
       if (!this.editing && this.runtime?.playing) await this.syncMedia();
     } catch (error) {
       if (token === this.token) {
@@ -350,9 +383,13 @@ export class PlayerView {
       this.preloadNext(runtime.scene);
     }
     if (event.type === "seek") {
-      if (this.video)
+      if (
+        this.video &&
+        mediaAt(runtime.scene, runtime.timeMs)?.id === this.currentClip?.id
+      )
         this.video.currentTime =
-          (runtime.scene.video.inMs + runtime.timeMs) / 1000;
+          (this.currentClip.inMs + runtime.timeMs - this.currentClip.startMs) /
+          1000;
       this.cancel();
       this.eventId = null;
     }
@@ -384,6 +421,7 @@ export class PlayerView {
     }
     if (event.type === "complete") {
       this.cleanupMedia();
+      this.visual.innerHTML = "";
       this.hud.innerHTML = "";
       this.message.hidden = false;
       this.message.innerHTML =
@@ -422,10 +460,15 @@ export class PlayerView {
         if (
           r.active?.event.pause &&
           Math.abs(
-            this.video.currentTime * 1000 - r.scene.video.inMs - r.timeMs,
+            this.video.currentTime * 1000 -
+              this.currentClip.inMs +
+              this.currentClip.startMs -
+              r.timeMs,
           ) > 100
         )
-          this.video.currentTime = (r.scene.video.inMs + r.timeMs) / 1000;
+          this.video.currentTime =
+            (this.currentClip.inMs + r.timeMs - this.currentClip.startMs) /
+            1000;
       } else if (this.video.paused && !this.playAttempt) {
         this.playAttempt = true;
         try {
@@ -467,6 +510,13 @@ export class PlayerView {
     }
   }
   paintScene(scene, time) {
+    if (
+      scene.source === "sequence" &&
+      !this.loading &&
+      this.mountedClipId !== (mediaAt(scene, time)?.id || "gap")
+    )
+      this.mount(scene, time);
+    this.paintOverlays(scene, time);
     if (scene.source === "images")
       this.paintImage(scene, time).catch((e) => this.showError(e.message));
     const title = this.root.querySelector(".scene-title");
@@ -482,7 +532,7 @@ export class PlayerView {
     const html = captions
       .map(
         (c) =>
-          `<span style="left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
+          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
       )
       .join("");
     const host = this.root.querySelector(".captions");
@@ -506,6 +556,39 @@ export class PlayerView {
     this.root
       .querySelector(".bars")
       .style.setProperty("--bar-height", height + "%");
+  }
+  paintOverlays(scene, time) {
+    let host = this.root.querySelector(".picture-overlays");
+    if (!host) {
+      host = document.createElement("div");
+      host.className = "picture-overlays";
+      this.stage.append(host);
+    }
+    const list = (scene.overlays || []).filter(
+        (x) => time >= x.startMs && time < x.endMs,
+      ),
+      key = this.token + JSON.stringify(list);
+    if (host.dataset.key === key) return;
+    host.dataset.key = key;
+    host.innerHTML = "";
+    const token = this.token;
+    for (const x of list) {
+      const img = new Image();
+      if (this.editing) {
+        img.dataset.editItem = x.id;
+        img.dataset.editKind = "overlay";
+      }
+      img.alt = this.project.assets[x.assetId]?.name || "";
+      img.style.cssText =
+        "left:" + x.x + "%;top:" + x.y + "%;width:" + x.width + "%";
+      host.append(img);
+      this.assets
+        .url(this.project.assets[x.assetId])
+        .then((url) => {
+          if (token === this.token && img.isConnected) img.src = url;
+        })
+        .catch(() => this.showError("叠加图片无法读取"));
+    }
   }
   paintEvent(event) {
     const key = event
@@ -567,7 +650,14 @@ export class PlayerView {
     if (r && !this.loading) {
       r.tick(
         dt,
-        this.video ? this.video.currentTime * 1000 - r.scene.video.inMs : null,
+        this.video && this.currentClip
+          ? Math.min(
+              this.video.currentTime * 1000 -
+                this.currentClip.inMs +
+                this.currentClip.startMs,
+              this.currentClip.startMs + clipLength(this.currentClip),
+            )
+          : null,
         this.buffering,
       );
       if (

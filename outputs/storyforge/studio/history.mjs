@@ -8,7 +8,12 @@ export class History {
   }
   commit(label, edit) {
     const before = clone(this.project);
-    edit(this.project);
+    try {
+      edit(this.project);
+    } catch (error) {
+      this.project = before;
+      throw error;
+    }
     if (JSON.stringify(before) === JSON.stringify(this.project)) return;
     this.past.push({ label, project: before });
     if (this.past.length > 80) this.past.shift();

@@ -1,3 +1,4 @@
+import { visualClips } from "./timeline.mjs";
 import { PlayerView } from "./player-view.mjs";
 import { inspect } from "./assets.mjs";
 import { esc } from "./storage.mjs";
@@ -12,6 +13,7 @@ export class Session {
   }
   clear() {
     this.token++;
+    this.openingObserver?.disconnect();
     this.player?.dispose();
     this.player = null;
     this.root.querySelectorAll("video,audio").forEach((v) => {
@@ -25,6 +27,34 @@ export class Session {
     }
     this.root.innerHTML = "";
   }
+  fitOpening(media) {
+    const opening = this.root.querySelector(".opening");
+    const frame = opening.querySelector(".opening-frame");
+    const fit = () => {
+      const ratio = media
+        ? (media.videoWidth || media.naturalWidth || 16) /
+          (media.videoHeight || media.naturalHeight || 9)
+        : 16 / 9;
+      const style = getComputedStyle(opening);
+      const width =
+        opening.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight);
+      const height =
+        opening.clientHeight -
+        parseFloat(style.paddingTop) -
+        parseFloat(style.paddingBottom);
+      const fittedWidth = Math.min(width, height * ratio);
+      frame.style.width = `${fittedWidth}px`;
+      frame.style.height = `${fittedWidth / ratio}px`;
+    };
+    this.openingObserver?.disconnect();
+    this.openingObserver = new ResizeObserver(fit);
+    this.openingObserver.observe(opening);
+    media?.addEventListener("loadedmetadata", fit, { once: true });
+    media?.addEventListener("load", fit, { once: true });
+    fit();
+  }
   async open(project, { sceneId = null, time = 0, only = null } = {}) {
     this.clear();
     this.project = structuredClone(project);
@@ -35,7 +65,14 @@ export class Session {
       return;
     }
     try {
-      this.root.innerHTML = `<div class="opening ${p.loading.titleLayout === "square" ? "square" : ""}" style="--loading-color:${p.loading.color}"><div class="opening-content"><h1>${esc(p.loading.title)}</h1><p>${esc(p.loading.subtitle)}</p></div><div class="load-progress"><span>${esc(p.loading.text)}</span><progress max="100" value="0"></progress><small>准备开场资源</small></div></div>`;
+      this.root.innerHTML = `<div class="opening loading-opening ${p.loading.titleLayout === "square" ? "square" : ""}" style="--loading-color:${p.loading.color}"><div class="opening-frame"><div class="opening-content"><h1>${
+        p.loading.titleLayout === "square"
+          ? Array.from(p.loading.title)
+              .map((char) => `<span>${esc(char)}</span>`)
+              .join("")
+          : esc(p.loading.title)
+      }</h1><p>${esc(p.loading.subtitle)}</p></div><div class="load-progress"><span>${esc(p.loading.text)}</span><progress max="100" value="0"></progress><small ${this.editor ? "" : "hidden"}>准备开场资源</small></div></div></div>`;
+      this.fitOpening();
       const bg = p.loading.video || p.loading.image;
       if (bg) {
         const a = p.assets[bg],
@@ -50,7 +87,8 @@ export class Session {
         } else el.alt = "加载封面";
         el.src = await this.assets.url(a);
         if (token !== this.token) return;
-        this.root.firstElementChild.prepend(el);
+        this.root.querySelector(".opening-frame").prepend(el);
+        this.fitOpening(el);
       }
       const entry = p.scenes.find((s) => s.id === p.entryId);
       const ids = [
@@ -58,9 +96,7 @@ export class Session {
           [
             bg,
             p.splash.video,
-            entry?.source === "images"
-              ? entry.images[0]?.assetId
-              : entry?.video?.assetId,
+            entry ? visualClips(entry)[0]?.assetId : null,
             ...(entry?.audio || []).map((x) => x.assetId),
           ].filter(Boolean),
         ),
@@ -108,7 +144,8 @@ export class Session {
     const token = this.token,
       p = this.project,
       c = p.splash;
-    this.root.innerHTML = `<div class="opening ${esc(c.effect)}"><div class="opening-content"><h1>${esc(c.title)}</h1><p>${esc(c.subtitle)}</p></div><button class="opening-start">点击或按任意键开始</button>${this.editor ? '<div class="game-home"><button data-leave>关闭试玩</button></div>' : ""}</div>`;
+    this.root.innerHTML = `<div class="opening ${esc(c.effect)}"><div class="opening-frame"><div class="opening-content"><h1>${esc(c.title)}</h1><p>${esc(c.subtitle)}</p></div><button class="opening-start">点击或按任意键开始</button></div></div>`;
+    this.fitOpening();
     if (c.video) {
       try {
         const url = await this.assets.url(p.assets[c.video]);
@@ -118,7 +155,8 @@ export class Session {
         v.loop = true;
         v.playsInline = true;
         v.preload = "auto";
-        this.root.firstElementChild.prepend(v);
+        this.root.querySelector(".opening-frame").prepend(v);
+        this.fitOpening(v);
         v.play().catch(() => {
           v.muted = true;
           v.play().catch(() => {});

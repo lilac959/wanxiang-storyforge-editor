@@ -1,4 +1,5 @@
-export const SCHEMA = 2;
+import { visualClips, clipLength } from "./timeline.mjs";
+export const SCHEMA = 3;
 export const clone = (value) => structuredClone(value);
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
 export const ms = (seconds) => Math.round(Number(seconds || 0) * 1000);
@@ -18,6 +19,11 @@ export const endTarget = () => ({ kind: "end" });
 export const sceneTarget = (id) =>
   id ? { kind: "scene", sceneId: id } : endTarget();
 export function duration(scene) {
+  if (scene.source === "sequence")
+    return Math.max(
+      scene.clips?.length ? 0 : scene.durationMs,
+      ...(scene.clips || []).map((c) => c.startMs + clipLength(c)),
+    );
   return scene.source === "images"
     ? scene.images.reduce((n, f) => n + f.durationMs, 0)
     : scene.video
@@ -38,6 +44,7 @@ export function newScene(name = "新的剧情段落") {
     subtitles: [],
     audio: [],
     effects: [],
+    overlays: [],
     next: endTarget(),
     grayscale: false,
     clean: true,
@@ -108,6 +115,7 @@ export function newProject(name = "未命名作品") {
     name,
     entryId: s.id,
     variables: {},
+    theme: { preset: "simple", accent: "#7165ef", text: "#ffffff" },
     assets: {},
     scenes: [s],
     loading: {
@@ -133,6 +141,8 @@ export function references(p) {
         p.splash.video,
         ...p.scenes.flatMap((s) => [
           s.video?.assetId,
+          ...(s.clips || []).map((c) => c.assetId),
+          ...(s.overlays || []).map((c) => c.assetId),
           ...s.images.map((f) => f.assetId),
           ...s.audio.map((a) => a.assetId),
         ]),
@@ -201,12 +211,22 @@ function builtin(source) {
 }
 export function migrate(input) {
   const old = input.project || input;
-  if (old.schemaVersion === SCHEMA) {
+  if ([2, SCHEMA].includes(old.schemaVersion)) {
     const p = clone(old);
+    p.schemaVersion = SCHEMA;
+    if (p.editor?.positions && Array.isArray(p.scenes))
+      p.scenes.forEach((scene, i) => {
+        p.editor.positions[scene.id] ||= {
+          x: 60 + (i % 3) * 340,
+          y: 60 + Math.floor(i / 3) * 390,
+        };
+      });
+    p.theme ||= { preset: "classic", accent: "#e5d6b1", text: "#f8f0e4" };
     const errors = validate(p).filter(
       (x) => x.level === "error" && x.code === "structure",
     );
     if (errors.length) throw Error(errors[0].message);
+    if (old.schemaVersion === 2) spaceCards(p);
     return p;
   }
   if (
@@ -223,6 +243,7 @@ export function migrate(input) {
   p.entryId = old.nodes[0].id;
   p.editor.positions = {};
   p.migratedFrom = 1;
+  p.theme = { preset: "classic", accent: "#e5d6b1", text: "#f8f0e4" };
   const asset = (source, name = "", kind = "video") => {
     if (!source) return null;
     if (!p.assets[source])
@@ -352,6 +373,7 @@ export function migrate(input) {
       y: 60 + Math.floor(i / 3) * 220,
     };
   });
+  spaceCards(p);
   p.migrationBackup = undefined;
   return p;
 }
@@ -368,7 +390,7 @@ export function validate(p, { publish = false } = {}) {
     finite = (x, a, b) => Number.isFinite(x) && x >= a && x <= b;
   if (
     !p ||
-    p.schemaVersion !== 2 ||
+    ![2, SCHEMA].includes(p.schemaVersion) ||
     !id(p.id) ||
     !str(p.name) ||
     !Array.isArray(p.scenes) ||
@@ -391,6 +413,13 @@ export function validate(p, { publish = false } = {}) {
       error("剧情地图位置无效", null, "structure");
       return issues;
     }
+  if (
+    p.theme &&
+    (!["classic", "simple"].includes(p.theme.preset) ||
+      !/^#[a-f0-9]{6}$/i.test(p.theme.accent) ||
+      !/^#[a-f0-9]{6}$/i.test(p.theme.text))
+  )
+    error("作品样式无效");
   const ids = new Set(),
     allIds = new Set();
   const unique = (value, label, sid) => {
@@ -404,7 +433,8 @@ export function validate(p, { publish = false } = {}) {
       !id(s.id) ||
       !str(s.name) ||
       !["story", "death", "ending"].includes(s.role) ||
-      !["video", "images"].includes(s.source) ||
+      !["video", "images", "sequence"].includes(s.source) ||
+      (s.source === "sequence" && !Array.isArray(s.clips)) ||
       !Array.isArray(s.images) ||
       !Array.isArray(s.events) ||
       !Array.isArray(s.subtitles) ||
@@ -454,10 +484,15 @@ export function validate(p, { publish = false } = {}) {
         error("变量动作无效", sid);
   };
   const target = (t, s) => {
-    if (!t || !["continue", "scene", "seek", "end"].includes(t.kind)) {
+    if (
+      !t ||
+      !["continue", "scene", "seek", "end", "unlinked"].includes(t.kind)
+    ) {
       error("剧情去向无效", s.id, "structure");
       return;
     }
+    if (t.kind === "unlinked")
+      (publish ? error : warn)("存在未连接的剧情出口", s.id);
     if (t.kind === "scene" && !ids.has(t.sceneId))
       error("连接的剧情段落不存在", s.id);
     if (t.kind === "seek" && (!integer(t.timeMs) || t.timeMs > duration(s)))
@@ -503,6 +538,37 @@ export function validate(p, { publish = false } = {}) {
   if (p.loading.video) ref(p.loading.video, null, "video");
   if (p.splash.video) ref(p.splash.video, null, "video");
   for (const s of p.scenes) {
+    if (s.source === "sequence") {
+      const clips = [...s.clips].sort(
+        (a, b) => (a?.startMs || 0) - (b?.startMs || 0),
+      );
+      let end = 0;
+      for (const c of clips) {
+        if (!c || !["video", "image"].includes(c.kind)) {
+          error("画面片段结构无效", s.id, "structure");
+          continue;
+        }
+        unique(c.id, "画面片段", s.id);
+        ref(c.assetId, s.id, c.kind);
+        if (
+          !integer(c.startMs) ||
+          !integer(c.inMs) ||
+          !integer(c.outMs) ||
+          clipLength(c) < 100
+        )
+          error("画面片段时间无效", s.id);
+        if (c.startMs < end) error("主画面片段不能重叠", s.id);
+        end = c.startMs + clipLength(c);
+        if (
+          c.kind === "video" &&
+          p.assets[c.assetId]?.durationMs &&
+          c.outMs > p.assets[c.assetId].durationMs + 100
+        )
+          error("片段出点超过素材时长", s.id);
+      }
+      if (publish && s.role === "story" && !clips.length)
+        error("场景缺少画面素材", s.id);
+    }
     if (s.video) {
       unique(s.video.id, "视频片段", s.id);
       ref(s.video.assetId, s.id, "video");
@@ -545,6 +611,28 @@ export function validate(p, { publish = false } = {}) {
       )
         error(`${label}时间超出段落范围`, s.id);
     };
+    for (const x of s.overlays || []) {
+      interval(x, "图片叠加");
+      ref(x.assetId, s.id, "image");
+      if (
+        !finite(x.x, 0, 100) ||
+        !finite(x.y, 0, 100) ||
+        !finite(x.width, 1, 100)
+      )
+        error("叠加图片位置无效", s.id);
+    }
+    for (const x of [
+      "events",
+      "subtitles",
+      "audio",
+      "effects",
+      "overlays",
+    ].flatMap((k) => s[k] || []))
+      if (
+        x.linkedClipId &&
+        !visualClips(s).some((c) => c.id === x.linkedClipId)
+      )
+        error("关联的画面片段不存在", s.id);
     for (const x of s.subtitles) {
       if (!x || !str(x.text)) {
         error("字幕结构无效", s.id, "structure");
@@ -692,4 +780,34 @@ export function validate(p, { publish = false } = {}) {
       warn(`「${s.name}」仍有占位选项文字`, s.id);
   }
   return issues;
+}
+
+function spaceCards(p) {
+  const placed = [];
+  for (const scene of p.scenes) {
+    const pos = p.editor.positions[scene.id];
+    if (!pos) continue;
+    const count =
+        1 +
+        scene.events.reduce(
+          (n, e) =>
+            n +
+            (e.kind === "choice" ? e.options.length : 1) +
+            (e.kind !== "choice" || e.endMode !== "wait" ? 1 : 0),
+          0,
+        ),
+      height = 176 + count * 34;
+    for (let pass = 0; pass < placed.length + 1; pass++) {
+      const hit = placed.find(
+        (x) =>
+          pos.x < x.x + 290 &&
+          pos.x + 290 > x.x &&
+          pos.y < x.y + x.h + 30 &&
+          pos.y + height + 30 > x.y,
+      );
+      if (!hit) break;
+      pos.y = hit.y + hit.h + 30;
+    }
+    placed.push({ ...pos, h: height });
+  }
 }
