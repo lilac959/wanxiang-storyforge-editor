@@ -37,7 +37,9 @@ Wrangler 4.148.0 已完成部署包检查。`npm run build` 原样复制素材�
 "routes": [{ "pattern": "www.talesparkai.cc", "custom_domain": true }]
 ```
 
-不要在 zone 尚未准备好时加入正式配置。完成后检查 HTTPS、根路径播放器、媒体 Range、公开版本读取及私有接口拒绝；另行按需要设置裸域跳转。
+2026-10-08 已完成接入：zone 已激活，两个域名均绑定到 `wanxiang-game`，Namecheap 使用 `derek.ns.cloudflare.com` 与 `luciana.ns.cloudflare.com`。Google MX、域名验证 TXT、DKIM TXT、验证 CNAME 均已保留并逐项比对。
+
+`www.talesparkai.cc` 是正式作品地址；裸域名及 HTTP 首页跳转至 HTTPS 正式地址。编辑器的 `PLAYER_URL` 环境变量用于生成正式分享链接，公开的 `/api/site` 只提供这个地址。域名账号和 DNS 原始备份不纳入 Git。
 
 参考：[Cloudflare Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)。
 

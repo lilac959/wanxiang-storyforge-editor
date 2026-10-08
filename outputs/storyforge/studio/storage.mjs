@@ -49,6 +49,19 @@ export class Storage {
   headers(extra = {}) {
     return { Authorization: `Bearer ${this.token}`, ...extra };
   }
+  async playerUrl() {
+    try {
+      const config = await response(
+        await fetch("/api/site", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(5000),
+        }),
+      );
+      const url = new URL(config.playerUrl, location.origin);
+      if (["https:", "http:"].includes(url.protocol)) return url.href;
+    } catch {}
+    return new URL("/game", location.origin).href;
+  }
   readLocal() {
     try {
       return JSON.parse(localStorage.getItem(LOCAL_KEY));

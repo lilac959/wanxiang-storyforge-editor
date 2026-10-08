@@ -9,9 +9,9 @@
       {
         "name": "PROJECT_COORDINATOR",
         "class_name": "ProjectCoordinator",
-        "script_name": "wanxiang-storyforge-editor",
-      },
-    ],
+        "script_name": "wanxiang-storyforge-editor"
+      }
+    ]
   },
   "assets": {
     "directory": "./public",
@@ -22,16 +22,27 @@
       "/game",
       "/game/",
       "/api/*",
-      "/assets/chapter01-branch-7.mp4",
-    ],
+      "/assets/chapter01-branch-7.mp4"
+    ]
   },
   "kv_namespaces": [
     {
       "binding": "PROJECT_STORE",
-      "id": "193077a2c5154127b9e5a02d52d1ec85",
-    },
+      "id": "193077a2c5154127b9e5a02d52d1ec85"
+    }
   ],
   "vars": {
     "GAME_ONLY": "true",
+    "PLAYER_URL": "https://www.talesparkai.cc/"
   },
+  "routes": [
+    {
+      "pattern": "www.talesparkai.cc",
+      "custom_domain": true
+    },
+    {
+      "pattern": "talesparkai.cc",
+      "custom_domain": true
+    }
+  ]
 }

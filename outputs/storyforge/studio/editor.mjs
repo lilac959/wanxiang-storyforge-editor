@@ -1353,10 +1353,11 @@ async function handleAction(action, button) {
           (x) => x.level === "error",
         );
         if (errors.length) throw Error("发布版本校验失败");
-        const url = new URL("/game", location.origin);
+        const publicUrl = await storage.playerUrl();
+        const url = new URL(publicUrl);
         url.searchParams.set("version", result.version);
         panel(
-          `<h2>发布成功</h2><p>已验证独立版本可以读取。草稿后续修改不会改变此版本。</p><p><a href="${esc(url.href)}" target="_blank" rel="noopener">打开本次发布的作品</a></p><p><a href="/game" target="_blank" rel="noopener">作品固定链接</a></p>`,
+          `<h2>发布成功</h2><p>已验证独立版本可以读取。草稿后续修改不会改变此版本。</p><p><a href="${esc(url.href)}" target="_blank" rel="noopener">打开本次发布的作品</a></p><p><a href="${esc(publicUrl)}" target="_blank" rel="noopener">作品固定链接</a></p>`,
         );
         status("● 已发布 · " + new Date(result.updatedAt).toLocaleString());
       } finally {

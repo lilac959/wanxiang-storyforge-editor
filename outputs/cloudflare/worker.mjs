@@ -4,6 +4,22 @@ export { ProjectCoordinator } from "./projects.mjs";
 export default {
   async fetch(request, env) {
     const incoming = new URL(request.url);
+    if (
+      env.GAME_ONLY === "true" &&
+      (incoming.hostname === "talesparkai.cc" ||
+        (incoming.hostname === "www.talesparkai.cc" &&
+          incoming.protocol === "http:"))
+    ) {
+      incoming.hostname = "www.talesparkai.cc";
+      incoming.protocol = "https:";
+      return Response.redirect(incoming.href, 308);
+    }
+    if (incoming.pathname === "/api/site" && request.method === "GET") {
+      return Response.json(
+        { playerUrl: env.PLAYER_URL || new URL("/game", incoming.origin).href },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (incoming.pathname.startsWith("/api/v2/")) {
       if (!env.PROJECT_COORDINATOR)
         return Response.json(
