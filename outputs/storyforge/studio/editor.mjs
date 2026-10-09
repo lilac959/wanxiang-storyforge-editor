@@ -1,3 +1,4 @@
+import { projectCatalog } from "./project-catalog.mjs";
 import { AssetLibrary, mediaUses } from "./asset-library.mjs";
 import {
   UI_COMPONENTS,
@@ -98,6 +99,8 @@ const sidebarLibrary = new AssetLibrary(
   (id, kind) => previewAsset(id, kind).catch((e) => notify(e.message)),
   dragLibraryAsset,
 );
+let publishAfterConnect = false;
+let projectRows = [];
 let componentPlayer,
   previewAssetToken = 0;
 const p = () => history.project,
@@ -125,12 +128,15 @@ function notify(text) {
 function status(state, detail) {
   const el = $(".save-status");
   if (!el) return;
-  el.classList.toggle("error", ["error", "conflict"].includes(state));
+  el.classList.toggle(
+    "error",
+    ["error", "conflict", "保存失败"].includes(state),
+  );
   el.textContent =
     {
       local: storage.token ? "待同步" : "已保存到本机",
       saving: "保存中…",
-      saved: "已保存",
+      saved: "已同步云端",
       upload: `↑ ${detail?.name || "素材"} · ${detail?.progress || 0}%`,
       conflict: "● 云端有其他修改 · 本机副本保留",
       error: "● 云端保存失败 · 可重试",
@@ -268,7 +274,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><button class="brand" data-action="projects" title="作品管理"><b>T</b>故事引擎 TaleSpark</button><span class="top-divider"></span><input class="project-name" aria-label="作品名称" data-field="name" data-scope="project"><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><details class="more-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="save">保存草稿</button><button data-action="connect">连接云端</button><button data-action="import">导入作品</button><button data-action="export">导出备份</button><button data-action="versions">发布历史</button><button data-action="check-project">检查作品</button><button data-page="theme">作品设置</button><button data-page="variables">剧情变量</button><button data-action="projects">作品列表</button><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">搜索</button><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">搜索</button><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
@@ -331,8 +337,13 @@ function render() {
     if (button && !$(".workspace-head [data-action=" + action + "]"))
       $(".workspace-head").append(button.cloneNode(true));
   }
-  const menu = $(".topbar > .more-menu");
-  if (menu) $(".topbar").prepend(menu);
+  const menu = $(".general-menu");
+  const menuHost =
+    page === "story" && graph ? $(".graph-toptools") : $(".workspace-head");
+  if (menu.parentElement !== menuHost) {
+    menu.removeAttribute("open");
+    menuHost.prepend(menu);
+  }
   for (const a of ["redo", "undo"]) {
     const b = $(".topbar [data-action=" + a + "]");
     if (b) $(".graph-bottomtools").prepend(b);
@@ -340,7 +351,8 @@ function render() {
   if (!p().scenes.some((x) => x.id === selected)) selected = p().entryId;
   if (!selectObject()) selection = { kind: "scene" };
   time = clamp(time, 0, duration(s()));
-  $(".project-name").value = p().name;
+  $(".project-name").textContent = p().name;
+  $(".project-name").title = p().name;
   document.title = `${p().name} · 故事引擎 TaleSpark`;
   document
     .querySelectorAll('[data-action="undo"]')
@@ -350,7 +362,13 @@ function render() {
     .forEach((b) => (b.disabled = !history.future.length));
   document
     .querySelectorAll("[data-page]")
-    .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+    .forEach((b) =>
+      b.classList.toggle(
+        "active",
+        b.dataset.page === page ||
+          (b.dataset.page === "theme" && page === "variables"),
+      ),
+    );
   const isOpening = page === "loading" || page === "splash";
   document.body.dataset.directory = String(directoryOpen);
   document.body.dataset.inspector = String(inspectorOpen);
@@ -824,7 +842,7 @@ function renderSettings() {
   const box = $(".settings-page");
   if (page === "theme") {
     box.innerHTML =
-      '<h2>作品设置</h2><div class="settings-links"><button data-page="variables">剧情变量</button><button data-action="connect">在线保存</button></div>';
+      '<h2>作品设置</h2><div class="settings-links"><button data-page="variables">剧情变量</button></div>';
     return;
   }
   if (page === "assets") {
@@ -939,12 +957,31 @@ function panel(html) {
   if (!$("#panel").open) $("#panel").showModal();
 }
 function closePanel() {
+  publishAfterConnect = false;
   newCardContext = null;
   clearAssetPreview();
   $("#panel").close();
   if (board) board.pending = null;
 }
+async function saveCurrent() {
+  try {
+    storage.saveLocal(p());
+  } catch (error) {
+    status("保存失败", error);
+    throw error;
+  }
+  if (storage.token) {
+    await sync();
+    if (storage.queue.stopped && storage.queue.pending)
+      throw Error("本机已保存，云端同步失败，请重试");
+  }
+}
 async function adopt(project, revision = "none", backup = true) {
+  if (history && backup) {
+    if (project.id === p().id && revision !== storage.queue.revision)
+      storage.saveLocal(p());
+    else await saveCurrent();
+  }
   clearTimeout(saveTimer);
   storage.queue.pending = null;
   storage.queue.stopped = true;
@@ -1282,11 +1319,17 @@ async function handleAction(action, button) {
       history.redo();
       break;
     case "save":
-      storage.saveLocal(p());
-      await sync();
-      notify(
-        storage.token ? "已执行草稿保存，请查看顶部状态" : "草稿已保存到本机",
-      );
+      button.disabled = true;
+      try {
+        await saveCurrent();
+        notify(
+          storage.token && !validate(p()).some((x) => x.level === "error")
+            ? "已保存并同步云端"
+            : "已保存到本机",
+        );
+      } finally {
+        button.disabled = false;
+      }
       break;
     case "canvas-view":
       openGraphNode([...board.selected][0] || selected);
@@ -1761,7 +1804,7 @@ async function handleAction(action, button) {
     }
     case "connect":
       panel(
-        '<h2>连接创作者云端</h2><p>授权仅保存在当前浏览器会话。连接后，编辑会自动同步私有草稿。</p><label class="field">发布授权<input id="cloud-key" type="password" autocomplete="off"></label><button class="primary" data-action="confirm-connect">连接并检查草稿</button>',
+        '<h2>连接发布服务</h2><p>连接后可同步草稿并发布作品。</p><label class="field">发布授权<input id="cloud-key" type="password" autocomplete="off"></label><button class="primary" data-action="confirm-connect">连接并检查草稿</button>',
       );
       break;
     case "confirm-connect": {
@@ -1779,20 +1822,27 @@ async function handleAction(action, button) {
       } catch (e) {
         if (e.status !== 404) throw e;
       }
+      const resumePublish = publishAfterConnect;
       closePanel();
       await sync();
+      if (resumePublish) {
+        showIssues(true);
+      }
       break;
     }
     case "load-cloud": {
+      const resumePublish = publishAfterConnect;
       const draft = await storage.draft(p().id);
       await adopt(migrate(draft.project), draft.revision);
       closePanel();
       notify("已打开云端草稿，本机原稿保留在恢复列表");
+      if (resumePublish) showIssues(true);
       break;
     }
     case "publish":
       if (busy) throw Error("请等待素材导入完成");
       if (!storage.token) {
+        publishAfterConnect = true;
         await handleAction("connect", button);
         break;
       }
@@ -1817,7 +1867,7 @@ async function handleAction(action, button) {
         const url = new URL(publicUrl);
         url.searchParams.set("version", result.version);
         panel(
-          `<h2>发布成功</h2><p>已验证独立版本可以读取。草稿后续修改不会改变此版本。</p><p><a href="${esc(url.href)}" target="_blank" rel="noopener">打开本次发布的作品</a></p><p><a href="${esc(publicUrl)}" target="_blank" rel="noopener">作品固定链接</a></p>`,
+          `<h2>发布成功</h2><p><a href="${esc(url.href)}" target="_blank" rel="noopener">打开本次发布的作品</a></p><p><a href="${esc(publicUrl)}" target="_blank" rel="noopener">作品固定链接</a></p><button data-action="versions">发布历史</button>`,
         );
         status("● 已发布 · " + new Date(result.updatedAt).toLocaleString());
       } finally {
@@ -2822,50 +2872,128 @@ function saveArchive(list) {
   localStorage.setItem("storyforge-projects", JSON.stringify(list));
 }
 async function showProjects() {
+  storage.saveLocal(p());
   const local = archiveList(),
     backups = storage.backups();
-  let cloud = [];
+  let cloud = [],
+    cloudError = "";
   if (storage.token)
     try {
       cloud = await response(
-        await fetch("/api/v2/projects", { headers: storage.headers() }),
+        await fetch("/api/v2/projects", {
+          headers: storage.headers(),
+          signal: AbortSignal.timeout(15000),
+        }),
       );
-    } catch {}
+    } catch (e) {
+      cloudError = "云端作品暂时无法读取，本机作品仍可打开。";
+    }
+  projectRows = projectCatalog(local, cloud);
+  const card = (row) => {
+    const current = row.id === p().id;
+    return (
+      '<article class="project-card" data-project-card="' +
+      esc(row.id) +
+      '"><div class="project-cover">▣</div><div class="project-card-heading"><h3>' +
+      esc(row.name) +
+      '</h3><details class="more-menu project-actions"><summary aria-label="' +
+      esc(row.name) +
+      '操作">···</summary><div><button data-action="rename-project" data-id="' +
+      esc(row.id) +
+      '">重命名</button><button data-action="copy-project" data-id="' +
+      esc(row.id) +
+      '">复制作品</button><button class="danger" data-action="delete-project" data-id="' +
+      esc(row.id) +
+      '">移入回收站</button></div></details></div><small>' +
+      (current ? "正在编辑 · " : "") +
+      (row.local && !row.local.deleted ? "本机" : "") +
+      (row.cloud && !row.cloud.deleted
+        ? row.local && !row.local.deleted
+          ? " · 云端"
+          : "云端"
+        : "") +
+      "</small><small>最近编辑 " +
+      esc(row.updatedAt ? new Date(row.updatedAt).toLocaleString() : "—") +
+      '</small><button data-action="open-managed-project" data-id="' +
+      esc(row.id) +
+      '">' +
+      (current ? "继续编辑" : "打开作品") +
+      "</button></article>"
+    );
+  };
   panel(
-    `<h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 空白作品</button><button data-action="demo">使用示例</button><button data-action="copy-project">复制当前作品</button><button data-action="import">导入作品</button></div><div class="project-grid">${Object.values(
-      local,
-    )
-      .filter((x) => !x.deleted)
-      .map(
-        (x) =>
-          `<div class="project-card"><div class="project-icon">▣</div><h3>${esc(x.project.name)}</h3><small>${x.project.scenes.length} 个场景</small><div class="mini-actions"><button data-action="open-local" data-id="${x.project.id}">打开</button><button data-action="trash-project" data-id="${x.project.id}">移入回收站</button></div></div>`,
-      )
-      .join("")}</div>${
-      cloud.length
-        ? `<details><summary>云端作品</summary>${cloud
-            .filter((x) => !x.deleted)
-            .map(
-              (x) =>
-                `<button class="full" data-action="open-project" data-id="${x.id}">${esc(x.name)}</button><button data-action="archive-cloud" data-id="${x.id}">移入回收站</button>`,
-            )
-            .join("")}</details>`
-        : ""
-    }<details><summary>回收站与恢复</summary>${cloud
-      .filter((x) => x.deleted)
-      .map(
-        (x) =>
-          `<button class="full" data-action="restore-cloud" data-id="${x.id}">恢复云端作品 ${esc(x.name)}</button>`,
-      )
-      .join("")}${Object.values(local)
-      .filter((x) => x.deleted)
-      .map(
-        (x) =>
-          `<button class="full" data-action="restore-project" data-id="${x.project.id}">恢复 ${esc(x.project.name)}</button>`,
-      )
-      .join(
-        "",
-      )}${backups.map((x) => `<button class="full" data-action="restore-backup" data-id="${esc(x.key)}">${esc(x.label)} · ${esc(new Date(x.updatedAt).toLocaleString())}</button>`).join("")}</details>`,
+    '<h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 新建作品</button><button data-action="demo">使用示例</button></div>' +
+      (cloudError ? "<p>" + cloudError + "</p>" : "") +
+      '<div class="project-grid">' +
+      projectRows
+        .filter((x) => !x.deleted)
+        .map(card)
+        .join("") +
+      '</div><details class="project-recovery"><summary>回收站与恢复</summary>' +
+      projectRows
+        .filter((x) => x.deleted)
+        .map(
+          (x) =>
+            '<button class="full" data-action="restore-managed-project" data-id="' +
+            esc(x.id) +
+            '">恢复 ' +
+            esc(x.name) +
+            "</button>",
+        )
+        .join("") +
+      backups
+        .map(
+          (x) =>
+            '<button class="full" data-action="restore-backup" data-id="' +
+            esc(x.key) +
+            '">' +
+            esc(x.label) +
+            " · " +
+            esc(new Date(x.updatedAt).toLocaleString()) +
+            "</button>",
+        )
+        .join("") +
+      "</details>",
   );
+  for (const row of projectRows.filter((x) => !x.deleted && x.local)) {
+    const project = row.local.project;
+    const first = visualClips(
+      project.scenes.find((x) => x.id === project.entryId) || project.scenes[0],
+    )[0];
+    const asset =
+      project.assets[
+        project.loading.image || project.loading.video || first?.assetId
+      ];
+    const host = [...document.querySelectorAll("[data-project-card]")]
+      .find((x) => x.dataset.projectCard === row.id)
+      ?.querySelector(".project-cover");
+    if (!host || !asset || !["image", "video"].includes(asset.kind)) continue;
+    try {
+      const url = await assets.url(asset);
+      if (!host.isConnected) continue;
+      const media = document.createElement(
+        asset.kind === "video" ? "video" : "img",
+      );
+      media.src = url;
+      media.setAttribute("aria-label", row.name + "封面");
+      if (asset.kind === "video") {
+        media.muted = true;
+        media.preload = "metadata";
+        media.onloadedmetadata = () => {
+          media.currentTime = Math.min(0.1, media.duration || 0);
+        };
+      }
+      host.replaceChildren(media);
+    } catch {}
+  }
+}
+async function managedProject(id) {
+  if (id === p().id)
+    return { project: clone(p()), revision: storage.queue.revision };
+  const row = projectRows.find((x) => x.id === id);
+  if (!row) throw Error("作品不存在");
+  if (row.local && !row.local.deleted) return row.local;
+  return storage.draft(id);
 }
 async function workspaceAction(action, button = { dataset: {} }) {
   const ids = () => {
@@ -2904,11 +3032,115 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     }
     case "copy-project": {
-      const copy = clone(p());
+      const source = await managedProject(button.dataset.id || p().id);
+      const copy = clone(source.project);
       copy.id = uid("project");
       copy.name += " 副本";
       await adopt(copy);
+      await showProjects();
+      break;
+    }
+    case "rename-project": {
+      const row = projectRows.find((x) => x.id === button.dataset.id);
+      panel(
+        '<h2>重命名作品</h2><label class="field">作品名称<input id="project-rename" aria-label="新作品名称" maxlength="120" value="' +
+          esc(row.name) +
+          '"></label><button class="primary" data-action="confirm-project-rename" data-id="' +
+          esc(row.id) +
+          '">保存名称</button> <button data-action="projects">取消</button>',
+      );
+      break;
+    }
+    case "confirm-project-rename": {
+      const name = $("#project-rename").value.trim();
+      if (!name) throw Error("请输入作品名称");
+      const id = button.dataset.id,
+        value = await managedProject(id);
+      value.project.name = name;
+      if (id === p().id) {
+        mutate("重命名作品", () => (p().name = name));
+        await saveCurrent();
+      } else {
+        const list = archiveList();
+        list[id] = { ...value, updatedAt: new Date().toISOString() };
+        saveArchive(list);
+        if (storage.token && projectRows.find((x) => x.id === id)?.cloud) {
+          const remote = await storage.draft(id);
+          if (remote.revision !== value.revision)
+            throw Error(
+              "名称已保存在本机，云端有其他修改，请先打开作品处理版本差异",
+            );
+          const result = await storage.writeCloud(
+            value.project,
+            remote.revision,
+          );
+          list[id].revision = result.revision;
+          saveArchive(list);
+        }
+      }
+      await showProjects();
+      break;
+    }
+    case "open-managed-project": {
+      const id = button.dataset.id;
+      const row = projectRows.find((x) => x.id === id),
+        value = await managedProject(id);
+      if (row.local && row.cloud && !row.cloud.deleted) {
+        const remote = await storage.draft(id);
+        if (remote.revision !== value.revision) {
+          panel(
+            '<h2>作品存在不同版本</h2><p>本机内容会保留为恢复副本，请选择要继续编辑的版本。</p><button data-action="open-local" data-id="' +
+              esc(id) +
+              '">继续本机版本</button><button data-action="open-project" data-id="' +
+              esc(id) +
+              '">打开云端版本</button>',
+          );
+          break;
+        }
+      }
+      if (id !== p().id)
+        await adopt(migrate(value.project), value.revision || "none");
       closePanel();
+      break;
+    }
+    case "delete-project": {
+      const id = button.dataset.id,
+        row = projectRows.find((x) => x.id === id);
+      await saveCurrent();
+      if (row.cloud && !row.cloud.deleted)
+        await response(
+          await fetch("/api/v2/archive", {
+            method: "POST",
+            headers: storage.headers({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ id, deleted: true }),
+          }),
+        );
+      const list = archiveList();
+      if (list[id]) {
+        list[id].deleted = true;
+        saveArchive(list);
+      }
+      if (id === p().id) await adopt(newProject(), "none", false);
+      await showProjects();
+      break;
+    }
+    case "restore-managed-project": {
+      const id = button.dataset.id,
+        row = projectRows.find((x) => x.id === id);
+      if (row.cloud?.deleted)
+        await response(
+          await fetch("/api/v2/archive", {
+            method: "POST",
+            headers: storage.headers({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ id, deleted: false }),
+          }),
+        );
+      const list = archiveList();
+      if (list[id]) {
+        list[id].deleted = false;
+        saveArchive(list);
+      }
+      await showProjects();
       break;
     }
     case "trash-project": {

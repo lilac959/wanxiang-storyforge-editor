@@ -1468,18 +1468,18 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
   display: none;
 }
 /* Unified menu, contextual story tools, and browsable media library. */
-.topbar > .more-menu {
+.general-menu {
   flex-shrink: 0;
 }
-.topbar > .more-menu > div {
+.general-menu > div {
   left: 0;
   right: auto;
   min-width: 190px;
 }
-.topbar > .more-menu > summary {
+.general-menu > summary {
   font-size: 19px;
 }
-.topbar > .more-menu > summary:after {
+.general-menu > summary:after {
   display: none;
 }
 body[data-view="graph"] .graph-area {
@@ -1492,7 +1492,7 @@ body[data-view="settings"] .library {
   display: none;
 }
 body[data-view="settings"] .workspace-head [data-action="preview-current"],
-body[data-view="settings"] .workspace-head .more-menu {
+body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
   display: none;
 }
 .settings-page {
@@ -1846,4 +1846,102 @@ body[data-view="settings"] .workspace-head .more-menu {
 }
 .component-preview[data-background="light"] .scenery > div {
   display: none;
+}
+/* Fixed work-area menu and compact project management. */
+.general-menu > summary {
+  width: 36px;
+  flex-shrink: 0;
+}
+.general-menu hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 5px 3px;
+}
+.workspace-head .general-menu {
+  margin-right: 8px;
+}
+.workspace-head {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  background: #fff;
+}
+.topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.topbar .project-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  padding: 8px 0;
+}
+.project-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-cover {
+  height: 116px;
+  background: #f1f0f8;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  color: #a9a1d6;
+  overflow: hidden;
+}
+.project-cover img,
+.project-cover video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.project-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.project-card-heading h3 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
+}
+.project-actions > summary {
+  width: 28px;
+  height: 28px;
+}
+.project-card small {
+  display: block;
+}
+.project-card > button {
+  margin-top: auto;
+}
+.project-recovery {
+  margin-top: 20px;
+}
+.project-actions > div {
+  min-width: 130px;
+}
+@media (max-width: 700px) {
+  .topbar .brand {
+    font-size: 13px;
+  }
+  .topbar .project-name {
+    max-width: 120px;
+  }
+  .topbar .save-status {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
