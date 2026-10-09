@@ -149,3 +149,114 @@ export function duplicateClip(s, cid) {
       }
   return copy;
 }
+
+// Insert at a visible boundary, pushing later material without overwriting it.
+export function insertionPoint(scene, at) {
+  at = Math.max(0, Math.round(at));
+  const c = visualClips(scene).find(
+    (c) => at > c.startMs && at < c.startMs + clipLength(c),
+  );
+  if (c)
+    return at < c.startMs + clipLength(c) / 2
+      ? c.startMs
+      : c.startMs + clipLength(c);
+  return at;
+}
+export function insertVisual(scene, asset, at) {
+  const clips = ensureSequence(scene);
+  at = insertionPoint(scene, at);
+  const length = asset.kind === "image" ? 3000 : asset.durationMs;
+  if (!Number.isFinite(length) || length < 100)
+    throw Error("素材时长无效，请重新读取素材");
+  const next = clips
+    .filter((c) => c.startMs >= at)
+    .sort((a, b) => a.startMs - b.startMs)[0];
+  const shift = next ? Math.max(0, at + length - next.startMs) : 0;
+  if (shift) {
+    const boundary = next.startMs;
+    for (const c of clips) if (c.startMs >= boundary) c.startMs += shift;
+    for (const key of ["events", "subtitles", "audio", "effects", "overlays"])
+      for (const x of scene[key] || []) {
+        if (x.startMs >= boundary) {
+          x.startMs += shift;
+          x.endMs += shift;
+        } else if (x.endMs > boundary) x.endMs += shift;
+      }
+  }
+  const clip = {
+    id: id(),
+    assetId: asset.id,
+    kind: asset.kind,
+    startMs: at,
+    inMs: 0,
+    outMs: length,
+  };
+  clips.push(clip);
+  clips.sort((a, b) => a.startMs - b.startMs);
+  return clip;
+}
+export function moveVisual(scene, cid, at) {
+  const clips = ensureSequence(scene),
+    c = clips.find((c) => c.id === cid);
+  if (!c) return;
+  at = Math.max(0, Math.round(at));
+  if (
+    !clips.some(
+      (x) =>
+        x !== c &&
+        at < x.startMs + clipLength(x) &&
+        at + clipLength(c) > x.startMs,
+    )
+  ) {
+    moveClip(scene, cid, at);
+    return;
+  }
+  const others = clips
+    .filter((x) => x !== c)
+    .sort((a, b) => a.startMs - b.startMs);
+  const index = others.findIndex((x) => at < x.startMs + clipLength(x) / 2);
+  others.splice(index < 0 ? others.length : index, 0, c);
+  const old = new Map(clips.map((x) => [x.id, x.startMs]));
+  let cursor = 0;
+  for (const x of others) {
+    const delta = cursor - old.get(x.id);
+    x.startMs = cursor;
+    for (const child of linked(scene, x.id)) {
+      child.startMs += delta;
+      child.endMs += delta;
+    }
+    cursor += clipLength(x);
+  }
+  scene.clips = others;
+}
+export function trimVisual(scene, cid, edge, delta, sourceDuration = 7200000) {
+  const clips = ensureSequence(scene),
+    c = clips.find((c) => c.id === cid);
+  if (!c) return;
+  if (edge === "left") {
+    const previous = Math.max(
+      0,
+      ...clips
+        .filter((x) => x !== c && x.startMs < c.startMs)
+        .map((x) => x.startMs + clipLength(x)),
+    );
+    const change = Math.max(
+      previous - c.startMs,
+      -c.inMs,
+      Math.min(delta, clipLength(c) - 100),
+    );
+    c.startMs += change;
+    c.inMs += change;
+  } else {
+    const next = Math.min(
+      Infinity,
+      ...clips
+        .filter((x) => x !== c && x.startMs > c.startMs)
+        .map((x) => x.startMs),
+    );
+    c.outMs = Math.max(
+      c.inMs + 100,
+      Math.min(c.outMs + delta, sourceDuration, c.inMs + next - c.startMs),
+    );
+  }
+}

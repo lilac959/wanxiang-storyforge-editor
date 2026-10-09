@@ -98,17 +98,8 @@ export function arrangeFlow(project, ports, subset = null) {
   for (const id of order)
     for (const t of forward.get(id))
       rank.set(t, Math.max(rank.get(t), rank.get(id) + 1));
-  const max = Math.max(...[...reachable].map((id) => rank.get(id)));
-  // Terminal scenes without forward successors align with the last reachable column.
-  for (const n of nodes)
-    if (
-      reachable.has(n.id) &&
-      ["ending", "death"].includes(n.role) &&
-      !forward.get(n.id).some((t) => reachable.has(t))
-    )
-      rank.set(n.id, max);
   const heights = new Map(
-    nodes.map((n) => [n.id, 164 + flowPorts(project, n, ports).length * 30]),
+    nodes.map((n) => [n.id, 170 + flowPorts(project, n, ports).length * 58]),
   );
   const columns = new Map();
   for (const n of nodes) {
@@ -132,7 +123,13 @@ export function arrangeFlow(project, ports, subset = null) {
       return avg(a) - avg(b);
     });
     for (const id of list) {
-      result[id] = { x: 60 + r * 360, y };
+      const incoming = parents.get(id).filter((p) => result[p]);
+      if (incoming.length)
+        y = Math.max(
+          y,
+          incoming.reduce((sum, p) => sum + result[p].y, 0) / incoming.length,
+        );
+      result[id] = { x: 60 + r * 400, y };
       y += heights.get(id) + 80;
     }
   }
@@ -306,3 +303,39 @@ export function routeFlow(start, end, rects, { back = false, lane = 0 } = {}) {
 }
 export const pathData = (points) =>
   points.map((p, i) => (i ? "L" : "M") + p.x + "," + p.y).join(" ");
+
+// Common return destinations have a discoverable local shortcut instead of a long wire.
+export function shortcutTarget(project, target) {
+  if (target.kind !== "scene") return false;
+  if (target.sceneId === SPLASH) return true;
+  const node = project.scenes.find((n) => n.id === target.sceneId);
+  if (node?.role !== "death") return false;
+  return true;
+}
+export function curveFlow(start, end, rects = [], options = {}) {
+  const gap = end.x - start.x;
+  const corridor = rects.some(
+    (r) =>
+      r.x > start.x &&
+      r.x + r.w < end.x &&
+      r.y < Math.max(start.y, end.y) + 20 &&
+      r.y + r.h > Math.min(start.y, end.y) - 20,
+  );
+  if (gap > 40 && !corridor) {
+    const bend = Math.max(45, gap * 0.48);
+    return `M${start.x},${start.y} C${start.x + bend},${start.y} ${end.x - bend},${end.y} ${end.x},${end.y}`;
+  }
+  const points = routeFlow(start, end, rects, options);
+  let d = `M${points[0].x},${points[0].y}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const a = points[i - 1],
+      b = points[i],
+      c = points[i + 1];
+    const l1 = Math.hypot(b.x - a.x, b.y - a.y),
+      l2 = Math.hypot(c.x - b.x, c.y - b.y);
+    const radius = Math.min(8, l1 / 2, l2 / 2);
+    if (!radius) continue;
+    d += ` L${b.x - ((b.x - a.x) * radius) / l1},${b.y - ((b.y - a.y) * radius) / l1} Q${b.x},${b.y} ${b.x + ((c.x - b.x) * radius) / l2},${b.y + ((c.y - b.y) * radius) / l2}`;
+  }
+  return d + ` L${end.x},${end.y}`;
+}

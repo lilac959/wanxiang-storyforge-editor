@@ -24,8 +24,8 @@ button {
     background 0.15s,
     border-color 0.15s;
 }
-#studio button,
-dialog:not(#preview) button {
+#studio button:not(.canvas button),
+dialog:not(#preview) button:not(.component-preview button) {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -33,8 +33,8 @@ dialog:not(#preview) button {
   padding: 8px 12px;
   white-space: nowrap;
 }
-#studio button:hover,
-dialog:not(#preview) button:hover {
+#studio button:not(.canvas button):hover,
+dialog:not(#preview) button:not(.component-preview button):hover {
   background: #f4f3ff;
   border-color: #c6c0f5;
 }
@@ -1323,7 +1323,7 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
     max-width: 95%;
   }
 }
-/* Stable, compact story flow. Ports are expanded only on selected cards. */
+/* Stable story flow: named exits stay in place at editing zoom. */
 .graph-card {
   width: 240px;
   padding: 0 12px 7px;
@@ -1339,7 +1339,7 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
   height: 43px;
 }
 .graph-card .node-ports {
-  display: none;
+  display: block;
 }
 .graph-card.selected .node-ports {
   display: block;
@@ -1465,5 +1465,385 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
   pointer-events: none;
 }
 .graph-board.overview .flow-label {
+  display: none;
+}
+/* Unified menu, contextual story tools, and browsable media library. */
+.topbar > .more-menu {
+  flex-shrink: 0;
+}
+.topbar > .more-menu > div {
+  left: 0;
+  right: auto;
+  min-width: 190px;
+}
+.topbar > .more-menu > summary {
+  font-size: 19px;
+}
+.topbar > .more-menu > summary:after {
+  display: none;
+}
+body[data-view="graph"] .graph-area {
+  height: 100%;
+}
+body[data-view="settings"] .layout {
+  grid-template-columns: 66px minmax(360px, 1fr);
+}
+body[data-view="settings"] .library {
+  display: none;
+}
+body[data-view="settings"] .workspace-head [data-action="preview-current"],
+body[data-view="settings"] .workspace-head .more-menu {
+  display: none;
+}
+.settings-page {
+  max-width: none;
+}
+.settings-links {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.graph-card .node-meta > button {
+  display: none;
+}
+.node-actions {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: none;
+  gap: 4px;
+  padding: 4px;
+  background: white;
+  border: 1px solid #ddd8ee;
+  border-radius: 9px;
+  box-shadow: 0 5px 18px #39304d12;
+}
+.graph-card.selected .node-actions {
+  display: flex;
+}
+.graph-card.selected .node-actions [data-node-open] {
+  opacity: 1;
+}
+.graph-board.overview .node-actions {
+  display: none;
+}
+#studio .node-actions button {
+  padding: 7px 10px;
+  font-size: 12px;
+}
+#studio .destination-tag {
+  display: block;
+  width: 100%;
+  text-align: right;
+  color: #7565c3;
+  background: #f5f3fc;
+  border: 0;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-port small {
+  max-width: 75px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.graph-bottomtools {
+  max-width: calc(100% - 35px);
+  flex-wrap: wrap;
+}
+.asset-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.asset-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+#studio .asset-tabs button {
+  border-color: transparent;
+}
+#studio .asset-tabs button[aria-pressed="true"] {
+  background: #eeeaff;
+  color: #6853db;
+  border-color: #ddd5ff;
+}
+.asset-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.asset-controls input {
+  max-width: 300px;
+}
+.asset-controls select {
+  width: 125px;
+}
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 18px;
+}
+.media-card {
+  position: relative;
+  min-width: 0;
+  border: 1px solid #e6e5ef;
+  border-radius: 12px;
+  background: white;
+}
+#studio .media-open {
+  display: block;
+  width: 100%;
+  padding: 0 0 12px;
+  text-align: left;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+}
+.media-thumb {
+  height: 145px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #edeef4;
+  border-radius: 12px 12px 0 0;
+  color: #9291a6;
+}
+.media-thumb.image,
+.media-preview {
+  background-color: #eee;
+  background-image: conic-gradient(
+    #ddd 25%,
+    transparent 0 50%,
+    #ddd 0 75%,
+    transparent 0
+  );
+  background-size: 20px 20px;
+}
+.media-thumb img,
+.media-thumb video {
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.media-thumb.video {
+  background: #151a22;
+}
+.media-open strong,
+.media-open small {
+  display: block;
+  margin: 10px 35px 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-open small {
+  margin-top: 5px;
+  color: #9293a4;
+  font-size: 11px;
+}
+.media-thumb.ui {
+  background: radial-gradient(ellipse at top, #303746, #10151e);
+}
+.ui-swatch {
+  padding: 12px 17px;
+  color: #e9d59e;
+  border: 1px solid #bba364;
+  font-size: 18px;
+}
+.ui-swatch.simple {
+  border-radius: 9px;
+  border-color: #8e7de4;
+  color: #eee6ff;
+  background: #7764d955;
+}
+.audio-symbol {
+  font-size: 44px;
+  color: #8d7be1;
+}
+.media-menu {
+  position: absolute;
+  right: 4px;
+  bottom: 10px;
+  z-index: 2;
+}
+.media-menu > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  box-shadow: 0 8px 25px #2222;
+  border: 1px solid #e6e3ed;
+  min-width: 160px;
+  border-radius: 9px;
+  padding: 6px;
+  z-index: 5;
+}
+#studio .media-menu button {
+  display: block;
+  border: 0;
+  width: 100%;
+  text-align: left;
+}
+.media-menu summary:after {
+  display: none;
+}
+.media-empty {
+  color: #9293a4;
+  padding: 45px;
+}
+.library .asset-toolbar {
+  gap: 8px;
+}
+.library .asset-tabs {
+  gap: 2px;
+}
+#studio .library .asset-tabs button {
+  padding: 5px 7px;
+  font-size: 11px;
+}
+.library .asset-controls {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.library .media-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.library .media-thumb {
+  height: 105px;
+}
+.library .media-menu {
+  bottom: 6px;
+}
+.media-preview {
+  width: 100%;
+  min-height: 180px;
+  max-height: 55vh;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+}
+.media-preview video,
+.media-preview img {
+  max-width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+.media-preview img {
+  cursor: zoom-in;
+}
+.media-preview img.actual-size {
+  max-width: none;
+  max-height: none;
+  cursor: zoom-out;
+}
+.media-preview audio {
+  width: 90%;
+}
+.component-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.component-controls select {
+  width: 145px;
+}
+.component-preview {
+  width: 100%;
+  height: 350px;
+  position: relative;
+  background: #101820;
+  margin: auto;
+}
+.component-preview[data-device="portrait"] {
+  width: 240px;
+  height: 440px;
+}
+.component-preview[data-device="landscape"] {
+  width: 100%;
+  height: 250px;
+}
+.component-preview > .player-root {
+  width: 100%;
+  height: 100%;
+}
+.component-preview[data-background="light"] .play-stage {
+  background: #dadbe1;
+}
+.component-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+}
+#panel .component-preview button {
+  white-space: normal;
+}
+#panel .component-preview .choices button {
+  background-color: #272825b8;
+  color: #f8f0e4;
+  border-radius: 0;
+  border-color: #b9a36b55;
+  padding: 0.7em 0.7em 0.7em 9cqw;
+}
+#panel .component-preview .simple-theme .choices button {
+  background: #252735dd;
+  border-radius: 8px;
+  padding: 12px 20px;
+  border: 1px solid var(--work-accent);
+}
+#panel .component-preview .settings-toggle {
+  position: absolute;
+  padding: 0;
+  border-radius: 50%;
+  background: #111b18aa;
+  color: #fff;
+}
+#panel .component-preview .hotspot {
+  border-radius: 50%;
+  color: #e9d6aa;
+  background: #192520aa;
+}
+@media (max-width: 900px) {
+  .media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .asset-controls {
+    flex-wrap: wrap;
+  }
+}
+.media-card.dragging {
+  opacity: 0.45;
+}
+.timeline-drop,
+.timeline-snap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #7764ed;
+  z-index: 8;
+  pointer-events: none;
+  font-size: 10px;
+  color: #6555c6;
+  white-space: nowrap;
+}
+.drop-lane {
+  background-color: #f1edff;
+  outline: 1px dashed #ada0ed;
+}
+.component-preview[data-background="light"] .scenery {
+  background: #dddfe7;
+}
+.component-preview[data-background="light"] .scenery > div {
   display: none;
 }

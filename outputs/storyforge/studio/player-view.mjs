@@ -713,6 +713,10 @@ export class PlayerView {
     }
   }
   paintEvent(event) {
+    this.root.classList.toggle(
+      "simple-theme",
+      (event?.uiPreset || this.project?.theme?.preset) === "simple",
+    );
     const key = event
       ? JSON.stringify([event, this.editing ? null : this.runtime?.variables])
       : "";

@@ -11,6 +11,8 @@ import {
   flowPorts,
   flowPositions,
   routeFlow,
+  curveFlow,
+  shortcutTarget,
   pathData,
 } from "./flow-layout.mjs";
 const svgEl = (name) =>
@@ -37,6 +39,19 @@ export class StoryBoard {
     this.guides = this.surface.querySelector(".graph-guides");
     host.addEventListener("pointerdown", (e) => this.pointer(e));
     host.addEventListener("click", (e) => this.click(e));
+    host.addEventListener("pointerover", (e) => {
+      const t = e.target.closest("[data-reveal-from]");
+      if (t) {
+        this.revealed = t.dataset.revealFrom + "|" + t.dataset.revealPath;
+        this.lines();
+      }
+    });
+    host.addEventListener("pointerout", (e) => {
+      if (e.target.closest("[data-reveal-from]")) {
+        this.revealed = null;
+        this.lines();
+      }
+    });
     host.addEventListener("dblclick", (e) => {
       if (e.target.closest("button,[data-line-from]")) return;
       const n = e.target.closest("[data-graph-scene]");
@@ -135,7 +150,7 @@ export class StoryBoard {
         el.className = "graph-card";
         el.dataset.graphScene = n.id;
         el.innerHTML =
-          '<div class="node-title"><i class="node-icon"></i><h3></h3><button class="node-menu">···</button></div><div class="node-thumb"></div><div class="node-meta"><span></span><button>编辑 ↗</button></div><div class="node-ports"></div><i class="node-input"></i>';
+          '<div class="node-title"><i class="node-icon"></i><h3></h3><button class="node-menu">···</button></div><div class="node-thumb"></div><div class="node-meta"><span></span><button>编辑 ↗</button></div><div class="node-ports"></div><div class="node-actions"><button class="node-edit">编辑</button><button class="node-play">从此处试玩</button></div><i class="node-input"></i>';
         this.surface.append(el);
         this.cards.set(n.id, el);
       }
@@ -155,23 +170,27 @@ export class StoryBoard {
       const open = el.querySelector(".node-meta button");
       open.dataset.nodeOpen = n.id;
       open.title = "进入编辑";
+      el.querySelector(".node-edit").dataset.nodeOpen = n.id;
+      el.querySelector(".node-play").dataset.nodePlay = n.id;
       const ps = this.ports(n);
       el.querySelector(".node-meta span").textContent = specialNode(n.id)
         ? n.id === LOADING
           ? "准备资源"
           : "等待开始"
-        : (duration(n) / 1000).toFixed(1) +
-          "s · " +
+        : (Number.isFinite(duration(n))
+            ? (duration(n) / 1000).toFixed(1) + " 秒"
+            : "时长待读取") +
+          " · " +
           ps.filter((p) => p.target.kind !== "end").length +
-          " 个出口";
-      const signature = JSON.stringify(ps);
+          " 个去向";
+      const signature = JSON.stringify([ps, this.nodes.map((n) => n.name)]);
       const ph = el.querySelector(".node-ports");
       if (ph.dataset.signature !== signature) {
         ph.dataset.signature = signature;
         ph.innerHTML = ps
           .map(
             (p) =>
-              `<button class="node-port ${p.target.kind === "unlinked" ? "unlinked" : ""}" data-port="${esc(p.path)}" data-from="${esc(n.id)}" ${p.fixed ? 'data-fixed="true"' : ""} title="${esc(p.label)}"><span>${esc(p.label)}</span><small>${esc(p.target.kind === "scene" ? this.nodes.find((n) => n.id === p.target.sceneId)?.name || "目标缺失" : { end: "结束", unlinked: "待连接" }[p.target.kind] || "")}</small><i></i></button>`,
+              `<button class="node-port ${p.target.kind === "unlinked" ? "unlinked" : ""}" data-port="${esc(p.path)}" data-from="${esc(n.id)}" ${p.fixed ? 'data-fixed="true"' : ""} title="${esc(p.label)}"><span>${esc(p.label)}</span><small>${esc(p.target.kind === "scene" ? this.nodes.find((n) => n.id === p.target.sceneId)?.name || "目标缺失" : { end: "结束", unlinked: "待连接" }[p.target.kind] || "")}</small><i></i></button>${!p.fixed && shortcutTarget(project, p.target) ? `<button class="destination-tag" data-locate-node="${esc(p.target.sceneId)}" data-reveal-from="${esc(n.id)}" data-reveal-path="${esc(p.path)}" title="点击定位；悬停查看连线">↗ ${esc(this.nodes.find((n) => n.id === p.target.sceneId)?.name || "目标缺失")}</button>` : ""}`,
           )
           .join("");
       }
@@ -217,7 +236,7 @@ export class StoryBoard {
       );
     this.looseLabel ||= Object.assign(document.createElement("div"), {
       className: "flow-loose-label",
-      textContent: "待连接区域",
+      textContent: "未接入主流程",
     });
     this.surface.append(this.looseLabel);
     this.looseLabel.hidden = !loose.length;
@@ -325,7 +344,7 @@ export class StoryBoard {
         }
         const f = this.positions[n.id],
           t = this.positions[to],
-          expanded = this.selected.has(n.id) && this.scale >= 0.48;
+          expanded = this.scale >= 0.48;
         const portEl = this.cards.get(n.id).querySelectorAll(".node-port")[i];
         const start = {
             x: f.x + W,
@@ -339,8 +358,20 @@ export class StoryBoard {
           back = t.x <= f.x;
         const isReturn =
           this.logicalPositions[to].x <= this.logicalPositions[n.id].x;
-        const points = routeFlow(start, end, rects, { back, lane: lane++ }),
-          d = pathData(points);
+        const d = curveFlow(start, end, rects, { back, lane: lane++ });
+        const shortcut =
+          !port.fixed && shortcutTarget(this.project, port.target);
+        edge.g.style.display =
+          shortcut &&
+          !this.showAllLines &&
+          this.revealed !== key &&
+          this.activeEdge?.from + "|" + this.activeEdge?.path !== key
+            ? "none"
+            : "";
+        edge.g.setAttribute(
+          "aria-label",
+          `${n.name} · ${port.label} → ${this.nodes.find((n) => n.id === to)?.name}`,
+        );
         edge.path.setAttribute("d", d);
         edge.hit.setAttribute("d", d);
         edge.handle.setAttribute("cx", end.x - 12);
@@ -361,7 +392,7 @@ export class StoryBoard {
         edge.text.textContent = (isReturn ? "返回 · " : "") + port.label;
         edge.text.setAttribute("x", start.x + 24);
         edge.text.setAttribute("y", start.y - 8);
-        edge.text.style.display = related || active ? "" : "none";
+        edge.text.style.display = active ? "" : "none";
       }
     }
     for (const [key, e] of this.edges)
@@ -432,6 +463,17 @@ export class StoryBoard {
       this.moved = false;
       return;
     }
+    const locate = e.target.closest("[data-locate-node]");
+    if (locate) {
+      this.locate(locate.dataset.locateNode);
+      this.choose(locate.dataset.locateNode);
+      return;
+    }
+    const play = e.target.closest("[data-node-play]");
+    if (play) {
+      this.choose(play.dataset.nodePlay);
+      return this.api.preview(play.dataset.nodePlay);
+    }
     const open = e.target.closest("[data-node-open]"),
       menu = e.target.closest("[data-node-menu]"),
       line = e.target.closest("[data-line-from]"),
@@ -474,7 +516,17 @@ export class StoryBoard {
     e.preventDefault();
     const initial = { x: e.clientX, y: e.clientY },
       f = this.positions[from],
-      start = { x: f.x + W, y: f.y + 80 },
+      portEl = [...this.cards.get(from).querySelectorAll(".node-port")].find(
+        (el) => el.dataset.port === path,
+      ),
+      start = {
+        x: f.x + W,
+        y:
+          f.y +
+          (portEl && this.scale >= 0.48
+            ? portEl.offsetTop + portEl.offsetHeight / 2
+            : 80),
+      },
       line = svgEl("path");
     line.classList.add("flow-preview");
     this.svg.append(line);
@@ -494,7 +546,7 @@ export class StoryBoard {
           mid = (start.x + end.x) / 2;
         line.setAttribute(
           "d",
-          pathData([start, { x: mid, y: start.y }, { x: mid, y: end.y }, end]),
+          `M${start.x},${start.y} C${mid},${start.y} ${mid},${end.y} ${end.x},${end.y}`,
         );
       },
       { signal: ctrl.signal },
