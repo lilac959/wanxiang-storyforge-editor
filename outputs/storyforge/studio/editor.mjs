@@ -1,4 +1,10 @@
+import { timelineThumbnail, audioWaveform } from "./timeline-media.mjs";
 import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
+import {
+  moveSelection,
+  copySelection,
+  pasteSelection,
+} from "./timeline-selection.mjs";
 import {
   trackRows,
   assignTrack,
@@ -129,6 +135,11 @@ const sidebarLibrary = new AssetLibrary(
 );
 let publishAfterConnect = false;
 let projectRows = [];
+let projectRequest = 0,
+  workspaceReturn = null;
+let timelineClipboard = null;
+const timelineSelection = new Set();
+const propertyTabs = new Map();
 let componentPlayer,
   previewAssetToken = 0;
 const p = () => history.project,
@@ -278,10 +289,10 @@ function targetFields(label, path, t) {
     return (
       `<h3>${s().role === "loading" ? "加载完成后" : "点击开始后"}</h3>` +
       field("后续动作", "next.kind", t.kind, {
-        options: { scene: "进入另一张卡片", unlinked: "待连接" },
+        options: { scene: "进入另一张节点", unlinked: "待连接" },
       }) +
       (t.kind === "scene"
-        ? field("目标卡片", "next.sceneId", t.sceneId, {
+        ? field("目标节点", "next.sceneId", t.sceneId, {
             options: Object.fromEntries(
               p()
                 .scenes.filter(
@@ -294,7 +305,7 @@ function targetFields(label, path, t) {
           })
         : "")
     );
-  return `<h3>${label}</h3>${field("后续动作", path + ".kind", t.kind, { options: { continue: "继续当前视频", scene: "进入另一剧情段落", seek: "跳到当前视频位置", end: "结束作品", unlinked: "待连接", home: "返回开屏" } })}${t.kind === "scene" ? field("目标段落", path + ".sceneId", t.sceneId, { options: Object.fromEntries(p().scenes.map((x) => [x.id, x.name])) }) : t.kind === "seek" ? seconds("跳转到（秒）", path + ".timeMs", t.timeMs) : ""}`;
+  return `<h3>${label}</h3>${field("后续动作", path + ".kind", t.kind, { options: { continue: "继续当前视频", scene: "进入另一剧情节点", seek: "跳到当前视频位置", end: "结束作品", unlinked: "待连接", home: "返回开屏" } })}${t.kind === "scene" ? field("目标节点", path + ".sceneId", t.sceneId, { options: Object.fromEntries(p().scenes.map((x) => [x.id, x.name])) }) : t.kind === "seek" ? seconds("跳转到（秒）", path + ".timeMs", t.timeMs) : ""}`;
 }
 function conditionFields(path, c) {
   const vars = Object.keys(p().variables);
@@ -317,7 +328,7 @@ function resultFields(label, path, r) {
     field("执行时机", path + ".timing", r.timing, {
       options: {
         immediate: "操作结束后立即执行",
-        sceneEnd: "当前段落播完后执行",
+        sceneEnd: "当前节点播完后执行",
       },
     }) +
     field("成功后结束当前慢放", path + ".restoreSpeed", r.restoreSpeed, {
@@ -328,13 +339,18 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="add-marker">添加标记</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起卡片目录">卡片目录</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="add-marker">添加标记</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
+  setupEditingLayout();
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
       selection = { kind, id };
+      timelineSelection.clear();
+      timelineSelection.add(id);
       renderInspector();
       renderTimeline();
+      revealTimelineItem(id);
+      markPreviewSelection();
     },
   });
   $(".canvas").addEventListener("dragover", (e) => {
@@ -380,7 +396,7 @@ function shell() {
     const id = e.dataTransfer.getData("text/plain"),
       to = e.target.closest("[data-scene]")?.dataset.scene;
     if (!id || !to || id === to) return;
-    mutate("调整段落顺序", (p) => {
+    mutate("调整节点顺序", (p) => {
       const i = p.scenes.findIndex((x) => x.id === id),
         j = p.scenes.findIndex((x) => x.id === to);
       if (i >= 0 && j >= 0) p.scenes.splice(j, 0, p.scenes.splice(i, 1)[0]);
@@ -389,6 +405,21 @@ function shell() {
 }
 function render() {
   stopTimelinePlayback();
+  $(".projects-page").hidden = page !== "projects";
+  if (page === "projects") {
+    document.body.dataset.view = "projects";
+    $(".workspace-head").hidden = true;
+    $(".story-work").hidden = true;
+    $(".graph-area").hidden = true;
+    $(".opening-work").hidden = true;
+    $(".settings-page").hidden = true;
+    document
+      .querySelectorAll(".rail button")
+      .forEach((b) => b.classList.remove("active"));
+    $(".rail .bottom").classList.add("active");
+    return;
+  }
+  $(".rail .bottom").classList.remove("active");
   for (const action of ["undo", "redo"]) {
     const button =
       $(".graph-bottomtools [data-action=" + action + "]") ||
@@ -461,13 +492,10 @@ function render() {
   $('[data-action="graph-view"]').hidden = page === "story" && graph;
   $('[data-action="canvas-view"]').hidden = page !== "story" || !graph;
   $(".story-work").hidden = page !== "story" || graph;
-  for (const action of ["add-qte", "add-choice", "add-hotspot"])
-    $(`[data-action="${action}"]`).hidden =
-      page === "story" && openingRole(s());
   $(".graph-scroll").hidden = page !== "story" || !graph;
   $(".settings-page").hidden = page === "story" || isOpening;
   $('[data-action="preview-current"]').textContent =
-    page === "story" ? "▷ 试玩场景" : "▷ 预览";
+    page === "story" ? "▷ 试玩当前节点" : "▷ 预览";
   $('[data-action="canvas-view"]').classList.toggle("active", !graph);
   $('[data-action="graph-view"]').classList.toggle("active", graph);
   if (page === "story") {
@@ -493,12 +521,8 @@ function paintStill() {
   still.previewHiddenTracks = previewTracks().hidden;
   still.timelineRate = previewRate(s(), time);
   still
-    .renderStill(
-      p(),
-      s(),
-      time,
-      !timelinePlaying && selection.kind === "event" ? selection.id : null,
-    )
+    .renderStill(p(), s(), time, null)
+    .then(() => markPreviewSelection())
     .catch((e) => notify(e.message));
   $(".board-list").innerHTML = s()
     .images.map(
@@ -557,7 +581,7 @@ function items() {
             ? x.kind === "choice"
               ? "分支选择"
               : x.kind === "hotspot"
-                ? "画面热点"
+                ? "点击区域"
                 : gestures[x.gesture]
             : kind === "subtitle"
               ? x.text
@@ -630,19 +654,12 @@ function renderTimeline() {
     ...mapped.filter((r) => r.kind === "event"),
     ...opening,
     ...mapped.filter((r) => r.kind === "visual"),
-    { id: "new-overlay", name: "＋ 叠加", kind: "overlay", items: [] },
+
     main,
     ...mapped.filter((r) => r.kind === "audio"),
-    { id: "new-audio", name: "＋ 音频", kind: "audio", items: [] },
+
     ...effects,
   ];
-  if (!display.some((r) => r.kind === "event"))
-    display.unshift({
-      id: "new-event",
-      name: "互动",
-      kind: "event",
-      items: [],
-    });
   const scroll = $(".timeline-scroll").scrollLeft;
   const ticks = rulerTicks(
     d,
@@ -654,7 +671,7 @@ function renderTimeline() {
         const type = row.kind === "visual" ? "overlay" : row.kind;
         const hidden = state.hidden.has(row.id),
           locked = state.locked.has(row.id);
-        return `<div class="track ${hidden ? "preview-hidden" : ""} ${locked ? "track-locked" : ""}" data-track="${type}" data-track-id="${esc(row.id)}"><div class="track-label"><span>${esc(row.name)}</span><div class="track-controls">${["visual", "audio"].includes(row.kind) ? `<button data-action="track-up" data-id="${esc(row.id)}" title="轨道上移">↑</button><button data-action="track-down" data-id="${esc(row.id)}" title="轨道下移">↓</button><button data-action="track-preview" data-id="${esc(row.id)}" title="${row.kind === "audio" ? "仅在编辑预览中静音" : "仅在编辑预览中隐藏"}" aria-pressed="${hidden}">${row.kind === "audio" ? "♪" : "◉"}</button>` : ""}<button data-action="track-lock" data-id="${esc(row.id)}" title="锁定拖动" aria-pressed="${locked}">${locked ? "🔒" : "🔓"}</button></div></div><div class="lane">${
+        return `<div class="track ${hidden ? "preview-hidden" : ""} ${locked ? "track-locked" : ""}" data-track="${type}" data-track-id="${esc(row.id)}"><div class="track-label"><span>${esc(row.name)}</span><div class="track-controls">${["visual", "audio"].includes(row.kind) ? `<button data-action="track-preview" data-id="${esc(row.id)}" title="${row.kind === "audio" ? "仅在编辑预览中静音" : "仅在编辑预览中隐藏"}" aria-pressed="${hidden}">${row.kind === "audio" ? "♪" : "◉"}</button>` : ""}<button data-action="track-lock" data-id="${esc(row.id)}" aria-label="${locked ? "解锁轨道" : "锁定轨道"}" title="${locked ? "解锁轨道" : "锁定轨道"}" aria-pressed="${locked}">${locked ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0"/></svg>'}</button></div></div><div class="lane">${
           row.kind === "event"
             ? conflicts
                 .filter((c) =>
@@ -666,13 +683,14 @@ function renderTimeline() {
                 )
                 .join("")
             : ""
-        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${selection.id === x.id ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒"><i class="handle left" data-edge="left"></i>${esc(x.label)}<i class="handle right" data-edge="right"></i></div>`).join("")}</div></div>`;
+        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${x.kind === "event" ? "fixed-duration" : ""} ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 固定时长，整体拖动调整出现位置" : ""}">${x.kind === "event" ? '<span class="interaction-clip-icon" aria-hidden="true">◇</span>' : '<i class="handle left" data-edge="left"></i>'}<span class="clip-name">${esc(x.label)}</span>${x.kind === "event" ? "" : '<i class="handle right" data-edge="right"></i>'}</div>`).join("")}</div></div>`;
       })
       .join(
         "",
       )}<div class="playhead"><button class="playhead-grip" aria-label="拖动播放头" title="拖动播放头"></button><span class="playhead-time"></span></div></div>`;
   $(".timeline-scroll").scrollLeft = scroll;
   updatePlayhead();
+  paintTimelineMedia();
 }
 function updatePlayhead() {
   const line = $(".playhead");
@@ -693,6 +711,7 @@ function renderInspector() {
   const panel = $(".inspector"),
     scroll = panel.scrollTop;
   renderInspectorContent();
+  organizeProperties(panel);
   if (page === "story" && graph) {
     const close = document.createElement("button");
     close.className = "inspector-close";
@@ -715,7 +734,7 @@ function renderInspectorContent() {
   ) {
     const id = [...board.selected][0];
     $(".inspector").innerHTML =
-      `<h2>${id === LOADING ? "加载" : "开屏"}</h2><button data-action="edit-special">进入编辑</button><p class="muted">${id === LOADING ? "准备完成后进入开屏" : "点击开始后进入起始剧情"}</p>`;
+      `<h2>${id === LOADING ? "加载" : "开屏"}</h2><button data-action="edit-special">进入编辑</button><p class="muted">${id === LOADING ? "准备完成后进入开屏" : "点击开始后进入起始节点"}</p>`;
     return;
   }
   if (page === "loading" || page === "splash") {
@@ -739,7 +758,7 @@ function renderInspectorContent() {
             .map((a) => [a.id, a.name]),
         ),
       }) +
-      seconds("场景开始（秒）", "startMs", obj.startMs) +
+      seconds("节点开始（秒）", "startMs", obj.startMs) +
       seconds("素材入点（秒）", "inMs", obj.inMs) +
       seconds("素材出点（秒）", "outMs", obj.outMs) +
       '<div class="mini-actions"><button data-action="clip-before">前移</button><button data-action="clip-after">后移</button><button data-action="split-clip">分割</button><button data-action="copy-item">复制</button><button data-action="delete-item">删除</button></div>';
@@ -769,9 +788,9 @@ function renderInspectorContent() {
     html += "";
   } else if (selection.kind === "scene")
     html +=
-      field("段落名称", "name", scene.name) +
+      field("节点名称", "name", scene.name) +
       field("剧情提示", "subtitle", scene.subtitle, { type: "textarea" }) +
-      field("段落用途", "role", scene.role, {
+      field("节点用途", "role", scene.role, {
         options: {
           story: "剧情",
           loading: "加载",
@@ -792,7 +811,7 @@ function renderInspectorContent() {
             ? { sequence: "时间轴片段" }
             : { video: "视频", images: "分镜图片序列" },
       }) +
-      `<button class="full" data-action="upload-scene">＋ 添加视频 / 图片</button><button class="full" data-action="video-link">从视频直链导入</button>${scene.video ? `<button class="full" data-select-kind="video" data-select-id="${scene.video.id}">编辑视频入点 / 出点</button>` : visualClips(scene).length ? "" : seconds("空场景时长（秒）", "durationMs", scene.durationMs)}${targetFields("播放结束后", "next", scene.next)}<button class="full danger" data-action="delete-scene">删除当前段落</button>`;
+      `<button class="full" data-action="upload-scene">＋ 添加视频 / 图片</button><button class="full" data-action="video-link">从视频直链导入</button>${scene.video ? `<button class="full" data-select-kind="video" data-select-id="${scene.video.id}">编辑视频入点 / 出点</button>` : visualClips(scene).length ? "" : seconds("空节点时长（秒）", "durationMs", scene.durationMs)}${targetFields("播放结束后", "next", scene.next)}<button class="full danger" data-action="delete-scene">删除当前节点</button>`;
   else if (selection.kind === "video")
     html +=
       "<h3>视频片段</h3>" +
@@ -810,7 +829,7 @@ function renderInspectorContent() {
     html +=
       "<h3>视频内互动</h3>" +
       field("互动类型", "kind", obj.kind, {
-        options: { qte: "动作操作", choice: "分支选择", hotspot: "画面热点" },
+        options: { qte: "动作互动", choice: "分支选择", hotspot: "点击区域" },
       }) +
       `<div class="two">${seconds("出现时间（秒）", "startMs", obj.startMs)}${seconds("区间结束（秒）", "endMs", obj.endMs)}</div>` +
       field("结束规则", "endMode", obj.endMode, {
@@ -851,6 +870,9 @@ function renderInspectorContent() {
           min: 40,
           max: 180,
           step: 5,
+        }) +
+        field("入场动效", "entryMotion", obj.entryMotion || "classic", {
+          options: { classic: "经典动效", fade: "淡入", none: "直接显示" },
         }) +
         field("操作音效", "sound", obj.sound, {
           options: { heartbeat: "心跳与机械反馈", off: "关闭" },
@@ -898,6 +920,9 @@ function renderInspectorContent() {
         field("纵向位置 %", "y", obj.y, { type: "number", min: 0, max: 100 }) +
         field("半透明文字底色", "background", obj.background, {
           type: "checkbox",
+        }) +
+        field("入场动效", "entryMotion", obj.entryMotion || "none", {
+          options: { none: "直接显示", fade: "淡入" },
         });
     if (selection.kind === "audio")
       html +=
@@ -914,7 +939,9 @@ function renderInspectorContent() {
           min: 0,
           max: 1,
           step: 0.05,
-        });
+        }) +
+        seconds("淡入时长（秒）", "fadeInMs", obj.fadeInMs || 0) +
+        seconds("淡出时长（秒）", "fadeOutMs", obj.fadeOutMs || 0);
     if (selection.kind === "effect")
       html +=
         field("效果", "kind", obj.kind, {
@@ -939,7 +966,7 @@ function renderInspectorContent() {
   );
   const critical = issues.filter((x) => x.level === "error");
   if (critical.length)
-    html += `<div class="issues"><strong>这张卡片有 ${critical.length} 项需要处理</strong><button data-action="check-project">查看问题与处理方式</button></div>`;
+    html += `<div class="issues"><strong>这张节点有 ${critical.length} 项需要处理</strong><button data-action="check-project">查看问题与处理方式</button></div>`;
   if (
     page === "story" &&
     ["event", "subtitle", "audio", "effect", "overlay"].includes(selection.kind)
@@ -957,7 +984,7 @@ function renderInspectorContent() {
     });
   if (page === "story" && graph && selection.kind === "scene")
     html =
-      "<h2>场景</h2>" +
+      "<h2>节点</h2>" +
       field("名称", "name", scene.name) +
       field("用途", "role", scene.role, {
         options: {
@@ -970,7 +997,7 @@ function renderInspectorContent() {
       }) +
       (openingRole(scene)
         ? ""
-        : '<div class="mini-actions"><button data-action="set-entry">设为起始剧情</button></div>') +
+        : '<div class="mini-actions"><button data-action="set-entry">设为起始节点</button></div>') +
       "<h3>出口</h3>" +
       ports(scene)
         .map(
@@ -1000,7 +1027,7 @@ function renderInspectorContent() {
   if (page === "story" && !graph && selection.kind === "scene") {
     const host = $(".inspector"),
       disclosure = document.createElement("details");
-    disclosure.innerHTML = "<summary>场景显示设置</summary>";
+    disclosure.innerHTML = "<summary>节点显示设置</summary>";
     for (const path of ["subtitle", "clean", "grayscale", "pending"]) {
       const field = host
         .querySelector(`[data-field="${path}"]`)
@@ -1165,7 +1192,7 @@ function renderSettings() {
           scope,
           options: { fade: "淡入", zoom: "缓慢放大", none: "直接显示" },
         })) +
-    `<button data-action="upload-opening">＋ 上传 / 替换背景素材</button><p class="muted">${page === "loading" ? "" : "视频循环播放，玩家点击或按键后进入明确的开始段落。"}</p>`;
+    `<button data-action="upload-opening">＋ 上传 / 替换背景素材</button><p class="muted">${page === "loading" ? "" : "视频循环播放，玩家点击或按键后进入明确的开始节点。"}</p>`;
 }
 function ports(scene) {
   if (openingRole(scene))
@@ -1369,7 +1396,7 @@ async function previewAsset(id, kind) {
         esc(c.name) +
         ' <small>第 1 版</small></h2><div class="component-controls"><select id="component-device" aria-label="预览设备"><option value="desktop">电脑</option><option value="portrait">手机竖屏</option><option value="landscape">手机横屏</option></select><select id="component-background" aria-label="预览背景"><option value="dark">深色背景</option><option value="light">浅色背景</option></select><button id="component-replay">重新试用</button><button id="component-success">成功效果</button><button id="component-failure">失败效果</button><button id="component-sound">声音开</button></div><div class="component-preview" data-device="desktop"><div class="player-root"></div></div><p class="muted">直接操作预览中的按钮；暂停、重试可使用左上角设置。</p><button class="primary" data-action="use-ui" data-id="' +
         esc(id) +
-        '">添加到当前场景</button>',
+        '">添加到当前节点</button>',
     );
     componentPlayer = new PlayerView(
       $(".component-preview .player-root"),
@@ -1420,7 +1447,7 @@ async function previewAsset(id, kind) {
       ) +
       '</p><button class="primary" data-action="use-asset" data-id="' +
       esc(id) +
-      '">添加到当前场景</button>',
+      '">添加到当前节点</button>',
   );
   const token = previewAssetToken,
     url = await assets.url(a);
@@ -1706,6 +1733,38 @@ function pick(context) {
   $("#assetFiles").click();
 }
 async function handleAction(action, button) {
+  if (action === "add-library-item") {
+    if (button.dataset.kind === "ui") return handleAction("use-ui", button);
+    if (page !== "story" || graph) {
+      page = "story";
+      graph = false;
+      selection = { kind: "scene" };
+      render();
+    }
+    mutate(
+      "添加素材到播放指针",
+      () =>
+        (selection = placeTimelineAsset(
+          p().assets[button.dataset.id],
+          time,
+          null,
+          s(),
+        )),
+    );
+    renderTimeline();
+    renderInspector();
+    revealTimelineItem(selection.id);
+    return;
+  }
+  if (
+    ["add-subtitle", "add-speed", "add-bars"].includes(action) &&
+    (page !== "story" || graph)
+  ) {
+    page = "story";
+    graph = false;
+    selection = { kind: "scene" };
+    render();
+  }
   if (await workspaceAction(action, button)) return;
   switch (action) {
     case "track-up":
@@ -1727,6 +1786,7 @@ async function handleAction(action, button) {
         id = button.dataset.id;
       locked.has(id) ? locked.delete(id) : locked.add(id);
       renderTimeline();
+      renderInspector();
       break;
     }
     case "timeline-conflict":
@@ -1778,8 +1838,8 @@ async function handleAction(action, button) {
 
       break;
     case "add-scene": {
-      const scene = newScene("新的剧情段落");
-      mutate("新建段落", (p) => {
+      const scene = newScene("新的剧情节点");
+      mutate("新建节点", (p) => {
         p.scenes.push(scene);
         p.editor.positions[scene.id] = {
           x: 60 + (p.scenes.length % 3) * 320,
@@ -1794,7 +1854,7 @@ async function handleAction(action, button) {
       break;
     }
     case "set-entry":
-      if (openingRole(s())) throw Error("请选择普通剧情卡片作为起始剧情");
+      if (openingRole(s())) throw Error("请选择普通剧情节点作为起始节点");
       mutate("设置入口", (p) => {
         p.entryId = selected;
         const splash = openingCard(p, "splash");
@@ -1806,20 +1866,20 @@ async function handleAction(action, button) {
       break;
 
       if (p().scenes.length === 1) {
-        notify("至少保留一个剧情段落");
+        notify("至少保留一个剧情节点");
         break;
       }
       const inbound = p().scenes.filter((x) =>
         targetsOf(x).some((t) => t.kind === "scene" && t.sceneId === selected),
       );
       panel(
-        `<h2>删除「${esc(s().name)}」</h2><p>${inbound.length ? `以下段落引用了它：${inbound.map((x) => esc(x.name)).join("、")}。这些出口将设为“结束作品”。` : "没有其他段落连接到这里。"}删除后可撤销，原始素材仍保留。</p><button class="danger" data-action="confirm-delete-scene">删除并处理连接</button>`,
+        `<h2>删除「${esc(s().name)}」</h2><p>${inbound.length ? `以下节点引用了它：${inbound.map((x) => esc(x.name)).join("、")}。这些出口将设为“结束作品”。` : "没有其他节点连接到这里。"}删除后可撤销，原始素材仍保留。</p><button class="danger" data-action="confirm-delete-scene">删除并处理连接</button>`,
       );
       break;
     }
     case "confirm-delete-scene": {
       const id = selected;
-      mutate("删除段落", (p) => {
+      mutate("删除节点", (p) => {
         p.scenes = p.scenes.filter((x) => x.id !== id);
         delete p.editor.positions[id];
         for (const scene of p.scenes)
@@ -1895,33 +1955,7 @@ async function handleAction(action, button) {
       break;
     }
     case "delete-item": {
-      if (selection.kind === "opening") {
-        mutate("隐藏开场元素", () => {
-          selectObject().hidden = true;
-        });
-        break;
-      }
-      if (["clip", "video", "image"].includes(selection.kind)) {
-        showClipDelete();
-        break;
-      }
-      const key = {
-        event: "events",
-        image: "images",
-        subtitle: "subtitles",
-        audio: "audio",
-        effect: "effects",
-        overlay: "overlays",
-      }[selection.kind];
-      if (key) {
-        const id = selection.id;
-        mutate(
-          "删除时间轴内容",
-          () => (s()[key] = s()[key].filter((x) => x.id !== id)),
-        );
-        selection = { kind: "scene" };
-        render();
-      }
+      deleteTimelineSelected();
       break;
     }
     case "image-up":
@@ -2002,7 +2036,7 @@ async function handleAction(action, button) {
           (x) => event.startMs < x.endMs && event.endMs > x.startMs,
         )
       )
-        throw Error("这里已有互动，请先把播放头移到空位");
+        assignTrack(s(), "event", event);
       mutate("添加互动 UI", () => s().events.push(event));
       closePanel();
       page = "story";
@@ -2057,10 +2091,12 @@ async function handleAction(action, button) {
     case "toggle-lines":
       board.showAllLines = !board.showAllLines;
       button.classList.toggle("active", board.showAllLines);
+      button.setAttribute("aria-pressed", String(board.showAllLines));
       board.lines();
       break;
     case "toggle-minimap":
       $(".minimap").hidden = !$(".minimap").hidden;
+      button.setAttribute("aria-pressed", String(!$(".minimap").hidden));
       localStorage.setItem("talespark-minimap", String(!$(".minimap").hidden));
       break;
     case "use-asset": {
@@ -2286,6 +2322,7 @@ async function handleAction(action, button) {
       break;
     case "align-start":
     case "align-end": {
+      assertTimelineUnlocked();
       const obj = selectObject(),
         isMain = ["clip", "video", "image"].includes(selection.kind);
       mutate("对齐播放头", () => {
@@ -2616,23 +2653,273 @@ function dragLibraryAsset(id, kind, phase, e) {
     notify(error.message);
   }
 }
+let cancelTimelineGesture = null;
+function selectedTimelineIds() {
+  return new Set(
+    selection.id && !timelineSelection.has(selection.id)
+      ? [selection.id]
+      : timelineSelection.size
+        ? timelineSelection
+        : [],
+  );
+}
+function assertTimelineUnlocked(ids = selectedTimelineIds()) {
+  for (const clip of $(".timeline-scroll").querySelectorAll("[data-clip]"))
+    if (
+      ids.has(clip.dataset.clip) &&
+      previewTracks().locked.has(clip.closest(".track").dataset.trackId)
+    )
+      throw Error("选中的轨道已锁定，请先解锁");
+}
+function beginTimelinePan(e) {
+  e.preventDefault();
+  const scroll = $(".timeline-scroll"),
+    start = {
+      x: e.clientX,
+      y: e.clientY,
+      left: scroll.scrollLeft,
+      top: scroll.scrollTop,
+    };
+  const controller = new AbortController();
+  const finish = () => {
+    controller.abort();
+    cancelTimelineGesture = null;
+  };
+  cancelTimelineGesture = finish;
+  window.addEventListener(
+    "pointermove",
+    (ev) => {
+      scroll.scrollLeft = start.left - ev.clientX + start.x;
+      scroll.scrollTop = start.top - ev.clientY + start.y;
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener("pointerup", finish, {
+    once: true,
+    signal: controller.signal,
+  });
+  window.addEventListener("pointercancel", finish, {
+    once: true,
+    signal: controller.signal,
+  });
+}
+function beginTimelineBox(e) {
+  e.preventDefault();
+  const scroll = $(".timeline-scroll"),
+    inner = scroll.querySelector(".timeline-inner");
+  const bounds = scroll.getBoundingClientRect();
+  const start = {
+    x: e.clientX - bounds.left + scroll.scrollLeft,
+    y: e.clientY - bounds.top + scroll.scrollTop,
+  };
+  const box = document.createElement("div");
+  box.className = "timeline-selection-box";
+  inner.append(box);
+  const controller = new AbortController();
+  const original = new Set(e.shiftKey ? selectedTimelineIds() : []);
+  let moved = false;
+  const cleanup = () => {
+    controller.abort();
+    box.remove();
+    cancelTimelineGesture = null;
+  };
+  cancelTimelineGesture = () => {
+    cleanup();
+    timelineSelection.clear();
+    original.forEach((id) => timelineSelection.add(id));
+    renderTimeline();
+  };
+  window.addEventListener(
+    "pointermove",
+    (ev) => {
+      const x = ev.clientX - bounds.left + scroll.scrollLeft,
+        y = ev.clientY - bounds.top + scroll.scrollTop;
+      if (Math.hypot(x - start.x, y - start.y) < 4 && !moved) return;
+      moved = true;
+      const left = Math.min(start.x, x),
+        top = Math.min(start.y, y),
+        right = Math.max(start.x, x),
+        bottom = Math.max(start.y, y);
+      Object.assign(box.style, {
+        left: left + "px",
+        top: top + "px",
+        width: right - left + "px",
+        height: bottom - top + "px",
+      });
+      timelineSelection.clear();
+      original.forEach((id) => timelineSelection.add(id));
+      const ir = inner.getBoundingClientRect();
+      for (const clip of inner.querySelectorAll("[data-clip]")) {
+        const r = clip.getBoundingClientRect();
+        if (
+          !previewTracks().locked.has(clip.closest(".track").dataset.trackId) &&
+          clip.dataset.kind !== "opening" &&
+          r.right - ir.left > left &&
+          r.left - ir.left < right &&
+          r.bottom - ir.top > top &&
+          r.top - ir.top < bottom
+        )
+          timelineSelection.add(clip.dataset.clip);
+        clip.classList.toggle(
+          "selected",
+          timelineSelection.has(clip.dataset.clip),
+        );
+      }
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    "pointerup",
+    (ev) => {
+      cleanup();
+      if (!moved) {
+        timelineSelection.clear();
+        selection = { kind: "scene" };
+        const ruler = scroll.querySelector(".ruler").getBoundingClientRect();
+        time = clamp(
+          ((ev.clientX - ruler.left) / ruler.width) * timelineSpan(),
+          0,
+          editableDuration(),
+        );
+        updatePlayhead();
+        queueStill();
+      } else {
+        const clip = [...scroll.querySelectorAll("[data-clip]")].find((el) =>
+          timelineSelection.has(el.dataset.clip),
+        );
+        selection = clip
+          ? { kind: clip.dataset.kind, id: clip.dataset.clip }
+          : { kind: "scene" };
+      }
+      renderTimeline();
+      renderInspector();
+    },
+    { once: true, signal: controller.signal },
+  );
+  window.addEventListener("pointercancel", () => cancelTimelineGesture?.(), {
+    once: true,
+    signal: controller.signal,
+  });
+}
+function beginTimelineGroupDrag(e) {
+  const ids = selectedTimelineIds();
+  try {
+    assertTimelineUnlocked(ids);
+  } catch (error) {
+    notify(error.message);
+    return;
+  }
+  const entries = items().filter((x) => ids.has(x.id));
+  if (
+    entries.some((x) => !Number.isFinite(x.start) || !Number.isFinite(x.end))
+  ) {
+    notify("请先修复选中片段的时间");
+    return;
+  }
+  const scroll = $(".timeline-scroll"),
+    lane = scroll.querySelector(".lane").getBoundingClientRect(),
+    initialScroll = scroll.scrollLeft;
+  const controller = new AbortController();
+  let delta = 0,
+    moved = false;
+  const cleanup = () => {
+    controller.abort();
+    cancelTimelineGesture = null;
+  };
+  cancelTimelineGesture = () => {
+    cleanup();
+    renderTimeline();
+  };
+  window.addEventListener(
+    "pointermove",
+    (ev) => {
+      if (Math.abs(ev.clientX - e.clientX) < 4 && !moved) return;
+      moved = true;
+      const raw =
+        ((ev.clientX - e.clientX + scroll.scrollLeft - initialScroll) /
+          lane.width) *
+        timelineSpan();
+      delta = Math.max(
+        -Math.min(...entries.map((x) => x.start)),
+        Math.round(raw),
+      );
+      for (const x of entries) {
+        const clip = [...scroll.querySelectorAll("[data-clip]")].find(
+          (el) => el.dataset.clip === x.id,
+        );
+        if (clip)
+          clip.style.left = ((x.start + delta) / timelineSpan()) * 100 + "%";
+      }
+      const bounds = scroll.getBoundingClientRect();
+      if (ev.clientX > bounds.right - 25) scroll.scrollLeft += 12;
+      if (ev.clientX < bounds.left + 85) scroll.scrollLeft -= 12;
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    "pointerup",
+    () => {
+      cleanup();
+      if (moved)
+        try {
+          mutate("移动选中片段", () => moveSelection(s(), ids, delta));
+        } catch (error) {
+          notify(error.message);
+        }
+      renderTimeline();
+      renderInspector();
+      queueStill();
+    },
+    { once: true, signal: controller.signal },
+  );
+  window.addEventListener("pointercancel", () => cancelTimelineGesture?.(), {
+    once: true,
+    signal: controller.signal,
+  });
+}
 function timelinePointer(e) {
+  if (e.button === 1) return beginTimelinePan(e);
   if (e.button !== 0 || e.target.closest("[data-action]")) return;
   let clip = e.target.closest("[data-clip]");
   if (
     clip &&
     previewTracks().locked.has(clip.closest(".track").dataset.trackId)
   ) {
-    notify("这条轨道已锁定，请先解锁再拖动");
+    selection = { kind: clip.dataset.kind, id: clip.dataset.clip };
+    renderInspector();
     return;
   }
   stopTimelinePlayback();
   if (!clip) {
-    if (e.target.closest(".ruler,.lane,.playhead")) beginTimelineScrub(e);
+    if (e.target.closest(".ruler,.playhead")) beginTimelineScrub(e);
+    else if (!e.target.closest(".track-label")) {
+      const bounds = $(".timeline-scroll").getBoundingClientRect();
+      if (e.clientX < bounds.right - 12 && e.clientY < bounds.bottom - 12)
+        beginTimelineBox(e);
+    }
     return;
   }
   e.preventDefault();
-  const edge = e.target.dataset.edge;
+  const edge = clip.dataset.kind === "event" ? null : e.target.dataset.edge;
+  if (e.shiftKey) {
+    const id = clip.dataset.clip;
+    if (!timelineSelection.size && selection.id && selection.id !== id)
+      timelineSelection.add(selection.id);
+    timelineSelection.has(id)
+      ? timelineSelection.delete(id)
+      : timelineSelection.add(id);
+    const active = timelineSelection.has(id)
+      ? id
+      : [...timelineSelection].at(-1);
+    const item = items().find((x) => x.id === active);
+    selection = item ? { kind: item.kind, id: active } : { kind: "scene" };
+    renderTimeline();
+    renderInspector();
+    markPreviewSelection();
+    return;
+  }
+  if (!timelineSelection.has(clip.dataset.clip)) timelineSelection.clear();
+  timelineSelection.add(clip.dataset.clip);
   selection = { kind: clip.dataset.kind, id: clip.dataset.clip };
   if (["video", "image"].includes(selection.kind)) {
     const oldId = selection.id;
@@ -2643,6 +2930,7 @@ function timelinePointer(e) {
   }
   renderInspector();
   paintStill();
+  if (timelineSelection.size > 1 && !edge) return beginTimelineGroupDrag(e);
   const obj = selectObject(),
     before = clone(obj);
   if (!obj) return;
@@ -2779,6 +3067,7 @@ function timelinePointer(e) {
   );
   const finish = (ev) => {
     controller.abort();
+    cancelTimelineGesture = null;
     guide.remove();
     if (ev.type === "pointercancel" || !moved) {
       renderTimeline();
@@ -2875,6 +3164,7 @@ function timelinePointer(e) {
       renderTimeline();
     }
   };
+  cancelTimelineGesture = () => finish({ type: "pointercancel" });
   window.addEventListener("pointerup", finish, {
     once: true,
     signal: controller.signal,
@@ -2975,11 +3265,22 @@ function canvasPointer(e) {
     kind: el.dataset.editKind || "event",
     id: el.dataset.editItem || el.dataset.editEvent,
   };
+  timelineSelection.clear();
+  timelineSelection.add(selection.id);
+  renderTimeline();
+  renderInspector();
+  revealTimelineItem(selection.id);
+  markPreviewSelection();
+  try {
+    assertTimelineUnlocked();
+  } catch {
+    return;
+  }
   const event = selectObject(),
     option = event.options?.find((x) => x.id === el.dataset.optionId),
     obj = option || event,
     before = { x: obj.x, y: obj.y },
-    rect = $(".canvas").getBoundingClientRect(),
+    rect = $(".canvas .play-stage").getBoundingClientRect(),
     start = { x: e.clientX, y: e.clientY };
   let dx = 0,
     dy = 0;
@@ -3091,7 +3392,7 @@ document.addEventListener("click", async (e) => {
     if (button?.dataset.port) {
       linkFrom = { sceneId: button.dataset.from, path: button.dataset.port };
       renderGraph();
-      notify("点击目标段落完成连接");
+      notify("点击目标节点完成连接");
       return;
     }
     const item = e.target.closest("[data-scene]");
@@ -3122,6 +3423,15 @@ document.addEventListener("change", (e) => {
           ? p().splash
           : selectObject();
   if (!obj) return;
+  if (page === "story" && !graph && scope === "selection") {
+    try {
+      assertTimelineUnlocked();
+    } catch (error) {
+      notify(error.message);
+      renderInspector();
+      return;
+    }
+  }
   if (scope === "scene") obj = s();
   let value =
     el.type === "checkbox"
@@ -3147,9 +3457,9 @@ document.addEventListener("change", (e) => {
       ) {
         pendingRole = { id: selected, role: value };
         panel(
-          `<h2>改为${value === "loading" ? "加载" : "开屏"}卡片？</h2><p>${other && other.id !== selected ? `原${value === "loading" ? "加载" : "开屏"}卡片“${esc(other.name)}”将改为剧情，内容保留。` : ""}${s().events.length ? "已有互动和分支暂时停用，改回剧情后可恢复。" : ""}${selected === p().entryId ? "起始剧情将改为另一张剧情卡片。" : ""}</p><button data-action="confirm-role">确认修改</button><button data-action="close-panel">取消</button>`,
+          `<h2>改为${value === "loading" ? "加载" : "开屏"}节点？</h2><p>${other && other.id !== selected ? `原${value === "loading" ? "加载" : "开屏"}节点“${esc(other.name)}”将改为剧情，内容保留。` : ""}${s().events.length ? "已有互动和分支暂时停用，改回剧情后可恢复。" : ""}${selected === p().entryId ? "起始节点将改为另一张剧情节点。" : ""}</p><button data-action="confirm-role">确认修改</button><button data-action="close-panel">取消</button>`,
         );
-      } else mutate("修改卡片用途", (p) => changeRole(p, selected, value));
+      } else mutate("修改节点用途", (p) => changeRole(p, selected, value));
       return;
     }
     mutate("修改属性", () => {
@@ -3314,6 +3624,7 @@ function rememberScene() {
   sceneViews.set(selected, { time, zoom, selection: clone(selection) });
 }
 function enterScene(id) {
+  timelineSelection.clear();
   if (!graph) rememberScene();
   selected = id;
   const view = sceneViews.get(id);
@@ -3403,7 +3714,7 @@ function setupBoard() {
       if (id === SPLASH) {
         newCardContext = null;
         panel(
-          '<h2>起始剧情</h2><select id="entry-target">' +
+          '<h2>起始节点</h2><select id="entry-target">' +
             p()
               .scenes.map(
                 (s) =>
@@ -3432,11 +3743,11 @@ function setupBoard() {
       const aid = transfer.getData("application/storyforge-asset");
       if (aid) {
         const scene = createScene(p().assets[aid].name);
-        mutate("素材创建场景", (p) => addAssetToScene(p, scene, p.assets[aid]));
+        mutate("素材创建节点", (p) => addAssetToScene(p, scene, p.assets[aid]));
         return;
       }
       if (transfer.files.length) {
-        const scene = createScene("新场景");
+        const scene = createScene("新节点");
         await importFiles([...transfer.files], {
           mode: "scene",
           sceneId: scene.id,
@@ -3603,7 +3914,7 @@ function renderLibrary() {
     return;
   }
   $(".library").innerHTML =
-    `<div class="sidebar-title">卡片目录 <small>${p().scenes.length}</small></div><input id="scene-search" placeholder="搜索卡片" value="${esc(sceneSearch)}">${p()
+    `<div class="sidebar-title">节点目录 <small>${p().scenes.length}</small></div><input id="scene-search" placeholder="搜索节点" value="${esc(sceneSearch)}">${p()
       .scenes.filter((x) =>
         x.name.toLowerCase().includes(sceneSearch.toLowerCase()),
       )
@@ -3613,7 +3924,7 @@ function renderLibrary() {
       )
       .join("")}`;
 }
-function createScene(name = "新场景", role = "story", source = "sequence") {
+function createScene(name = "新节点", role = "story", source = "sequence") {
   const scene = newScene(name);
   scene.source = source;
   scene.clips = [];
@@ -3635,7 +3946,7 @@ function createScene(name = "新场景", role = "story", source = "sequence") {
     )
   )
     position.y += 220;
-  mutate("新建并连接场景", (p) => {
+  mutate("新建并连接节点", (p) => {
     p.editor.positions = positions;
     p.scenes.push(scene);
     p.editor.positions[scene.id] = position;
@@ -3663,7 +3974,7 @@ function showConnection(id, path) {
     t = get(scene, path),
     port = ports(scene).find((x) => x.path === path);
   panel(
-    `<h2>${esc(port?.label || "剧情连接")}</h2><label class="field">下一卡片<select id="connection-target"><option value="unlinked">待连接</option>${openingRole(scene) ? "" : '<option value="end">结束作品</option><option value="continue">继续播放</option><option value="home">返回开屏</option>'}${p()
+    `<h2>${esc(port?.label || "剧情连接")}</h2><label class="field">下一节点<select id="connection-target"><option value="unlinked">待连接</option>${openingRole(scene) ? "" : '<option value="end">结束作品</option><option value="continue">继续播放</option><option value="home">返回开屏</option>'}${p()
       .scenes.filter(
         (x) =>
           x.role !== "loading" && (scene.role !== "splash" || !openingRole(x)),
@@ -3674,7 +3985,7 @@ function showConnection(id, path) {
       )
       .join(
         "",
-      )}</select></label><button class="primary" data-action="save-connection">确定</button> <button data-action="create-connected">新建并连接场景</button> <button data-action="unlink">移除连接</button>`,
+      )}</select></label><button class="primary" data-action="save-connection">确定</button> <button data-action="create-connected">新建并连接节点</button> <button data-action="unlink">移除连接</button>`,
   );
   if (t.kind !== "scene")
     $("#connection-target").value = t.kind === "seek" ? "continue" : t.kind;
@@ -3707,22 +4018,48 @@ function saveArchive(list) {
   localStorage.setItem("storyforge-projects", JSON.stringify(list));
 }
 async function showProjects() {
-  storage.saveLocal(p());
+  const request = ++projectRequest;
+  if (page !== "projects")
+    workspaceReturn = {
+      page,
+      graph,
+      selected,
+      selection: clone(selection),
+      time,
+    };
+  closePanel();
+  page = "projects";
+  render();
   const local = archiveList(),
     backups = storage.backups();
-  let cloud = [],
-    cloudError = "";
-  if (storage.token)
-    try {
-      cloud = await response(
-        await fetch("/api/v2/projects", {
-          headers: storage.headers(),
-          signal: AbortSignal.timeout(15000),
-        }),
+  void renderProjects(
+    local,
+    [],
+    backups,
+    storage.token ? "正在读取云端作品…" : "",
+  );
+  storage.saveLocal(p());
+  if (!storage.token) return;
+  try {
+    const cloud = await response(
+      await fetch("/api/v2/projects", {
+        headers: storage.headers(),
+        signal: AbortSignal.timeout(15000),
+      }),
+    );
+    if (request !== projectRequest || page !== "projects") return;
+    await renderProjects(archiveList(), cloud, storage.backups());
+  } catch {
+    if (request === projectRequest && page === "projects")
+      await renderProjects(
+        archiveList(),
+        [],
+        storage.backups(),
+        "云端作品暂时无法读取，本机作品仍可打开。",
       );
-    } catch (e) {
-      cloudError = "云端作品暂时无法读取，本机作品仍可打开。";
-    }
+  }
+}
+async function renderProjects(local, cloud, backups, cloudError = "") {
   projectRows = projectCatalog(local, cloud);
   const card = (row) => {
     const current = row.id === p().id;
@@ -3756,71 +4093,75 @@ async function showProjects() {
       "</button></article>"
     );
   };
-  panel(
-    '<h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 新建作品</button><button data-action="demo">使用示例</button></div>' +
-      (cloudError ? "<p>" + cloudError + "</p>" : "") +
-      '<div class="project-grid">' +
-      projectRows
-        .filter((x) => !x.deleted)
-        .map(card)
-        .join("") +
-      '</div><details class="project-recovery"><summary>回收站与恢复</summary>' +
-      projectRows
-        .filter((x) => x.deleted)
-        .map(
-          (x) =>
-            '<button class="full" data-action="restore-managed-project" data-id="' +
-            esc(x.id) +
-            '">恢复 ' +
-            esc(x.name) +
-            "</button>",
-        )
-        .join("") +
-      backups
-        .map(
-          (x) =>
-            '<button class="full" data-action="restore-backup" data-id="' +
-            esc(x.key) +
-            '">' +
-            esc(x.label) +
-            " · " +
-            esc(new Date(x.updatedAt).toLocaleString()) +
-            "</button>",
-        )
-        .join("") +
-      "</details>",
+  $(".projects-page").innerHTML =
+    '<button data-action="return-workspace">← 返回编辑</button><h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 新建作品</button><button data-action="demo">使用示例</button></div>' +
+    (cloudError ? '<p role="status">' + cloudError + "</p>" : "") +
+    '<div class="project-grid">' +
+    projectRows
+      .filter((x) => !x.deleted)
+      .map(card)
+      .join("") +
+    '</div><details class="project-recovery"><summary>回收站与恢复</summary>' +
+    projectRows
+      .filter((x) => x.deleted)
+      .map(
+        (x) =>
+          '<button class="full" data-action="restore-managed-project" data-id="' +
+          esc(x.id) +
+          '">恢复 ' +
+          esc(x.name) +
+          "</button>",
+      )
+      .join("") +
+    backups
+      .map(
+        (x) =>
+          '<button class="full" data-action="restore-backup" data-id="' +
+          esc(x.key) +
+          '">' +
+          esc(x.label) +
+          " · " +
+          esc(new Date(x.updatedAt).toLocaleString()) +
+          "</button>",
+      )
+      .join("") +
+    "</details>";
+  await Promise.all(
+    projectRows
+      .filter((x) => !x.deleted && x.local)
+      .map(async (row) => {
+        const project = row.local.project;
+        const first = visualClips(
+          project.scenes.find((x) => x.id === project.entryId) ||
+            project.scenes[0],
+        )[0];
+        const asset =
+          project.assets[
+            project.loading.image || project.loading.video || first?.assetId
+          ];
+        const host = [...document.querySelectorAll("[data-project-card]")]
+          .find((x) => x.dataset.projectCard === row.id)
+          ?.querySelector(".project-cover");
+        if (!host || !asset || !["image", "video"].includes(asset.kind)) return;
+        try {
+          const url = await assets.url(asset);
+          if (!host.isConnected) return;
+          const media = document.createElement(
+            asset.kind === "video" ? "video" : "img",
+          );
+          media.src = url;
+          media.setAttribute("aria-label", row.name + "封面");
+          if (asset.kind === "video") {
+            media.muted = true;
+            media.preload = "metadata";
+            media.onloadedmetadata = () => {
+              media.currentTime = Math.min(0.1, media.duration || 0);
+            };
+          }
+          host.replaceChildren(media);
+        } catch {}
+      }),
   );
-  for (const row of projectRows.filter((x) => !x.deleted && x.local)) {
-    const project = row.local.project;
-    const first = visualClips(
-      project.scenes.find((x) => x.id === project.entryId) || project.scenes[0],
-    )[0];
-    const asset =
-      project.assets[
-        project.loading.image || project.loading.video || first?.assetId
-      ];
-    const host = [...document.querySelectorAll("[data-project-card]")]
-      .find((x) => x.dataset.projectCard === row.id)
-      ?.querySelector(".project-cover");
-    if (!host || !asset || !["image", "video"].includes(asset.kind)) continue;
-    try {
-      const url = await assets.url(asset);
-      if (!host.isConnected) continue;
-      const media = document.createElement(
-        asset.kind === "video" ? "video" : "img",
-      );
-      media.src = url;
-      media.setAttribute("aria-label", row.name + "封面");
-      if (asset.kind === "video") {
-        media.muted = true;
-        media.preload = "metadata";
-        media.onloadedmetadata = () => {
-          media.currentTime = Math.min(0.1, media.duration || 0);
-        };
-      }
-      host.replaceChildren(media);
-    } catch {}
-  }
 }
 async function managedProject(id) {
   if (id === p().id)
@@ -3833,15 +4174,28 @@ async function managedProject(id) {
 async function workspaceAction(action, button = { dataset: {} }) {
   const ids = () => {
     const list = [...board.selected].filter((id) => !specialNode(id));
-    if (!list.length) throw Error("请选择卡片");
+    if (!list.length) throw Error("请选择节点");
     return list;
   };
   switch (action) {
+    case "projects":
+      await showProjects();
+      break;
+    case "return-workspace":
+      projectRequest++;
+      if (workspaceReturn)
+        ({ page, graph, selected, selection, time } = workspaceReturn);
+      else {
+        page = "story";
+        graph = true;
+      }
+      render();
+      break;
     case "close-panel":
       closePanel();
       break;
     case "confirm-role":
-      mutate("修改卡片用途", (p) =>
+      mutate("修改节点用途", (p) =>
         changeRole(p, pendingRole.id, pendingRole.role),
       );
       closePanel();
@@ -4006,12 +4360,12 @@ async function workspaceAction(action, button = { dataset: {} }) {
     case "new-card":
       if (button.dataset.action) newCardContext = null;
       panel(
-        '<h2>新建场景</h2><label class="field">名称<input id="new-scene-name" placeholder="场景名称" value="新场景"></label><label class="field">类型<select id="new-scene-type"><option value="story">空白场景</option><option value="video">视频场景</option><option value="image">图片场景</option><option value="ending">结局</option><option value="death">失败场景</option></select></label><button class="primary" data-action="create-card">创建</button>',
+        '<h2>新建节点</h2><label class="field">名称<input id="new-scene-name" placeholder="节点名称" value="新节点"></label><label class="field">类型<select id="new-scene-type"><option value="story">空白节点</option><option value="video">视频节点</option><option value="image">图片节点</option><option value="ending">结局</option><option value="death">失败节点</option></select></label><button class="primary" data-action="create-card">创建</button>',
       );
       break;
     case "create-card": {
       const type = $("#new-scene-type").value,
-        name = $("#new-scene-name").value.trim() || "新场景";
+        name = $("#new-scene-name").value.trim() || "新节点";
       const scene = createScene(
         name,
         ["ending", "death"].includes(type) ? type : "story",
@@ -4027,7 +4381,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "rename-scene":
       mutate(
-        "重命名场景",
+        "重命名节点",
         () => (s().name = $("#rename-scene").value.trim() || s().name),
       );
       closePanel();
@@ -4041,7 +4395,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "copy-scenes": {
       let copied;
-      mutate("复制场景", (p) => (copied = copyScenes(p, ids())));
+      mutate("复制节点", (p) => (copied = copyScenes(p, ids())));
       selected = copied[0].id;
       board.selected = new Set(copied.map((s) => s.id));
       closePanel();
@@ -4052,7 +4406,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       pendingDelete = ids();
       const keep = p().scenes.filter((s) => !pendingDelete.includes(s.id));
       if (!keep.some((s) => !openingRole(s)))
-        throw Error("至少保留一张剧情卡片");
+        throw Error("至少保留一张剧情节点");
       const inbound = p().scenes.filter(
         (s) =>
           !pendingDelete.includes(s.id) &&
@@ -4061,20 +4415,20 @@ async function workspaceAction(action, button = { dataset: {} }) {
           ),
       );
       panel(
-        `<h2>删除 ${pendingDelete.length} 张卡片？</h2><p>${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "loading") ? "删除加载卡片后，使用默认资源准备提示。" : ""}${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "splash") ? "删除开屏后，启动流程直接进入起始剧情。" : ""}${inbound.length ? "关联卡片：" + inbound.map((x) => esc(x.name)).join("、") + "。剧情出口将标记为待连接，开场连接会调整到起始剧情。" : "删除后可以撤销，素材仍保留。"}</p>${
+        `<h2>删除 ${pendingDelete.length} 张节点？</h2><p>${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "loading") ? "删除加载节点后，使用默认资源准备提示。" : ""}${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "splash") ? "删除开屏后，启动流程直接进入起始节点。" : ""}${inbound.length ? "关联节点：" + inbound.map((x) => esc(x.name)).join("、") + "。剧情出口将标记为待连接，开场连接会调整到起始节点。" : "删除后可以撤销，素材仍保留。"}</p>${
           pendingDelete.includes(p().entryId)
             ? `<label class="field">新的故事入口<select id="new-entry">${keep
                 .filter((s) => !openingRole(s))
                 .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`)
                 .join("")}</select></label>`
             : ""
-        }<button class="danger" data-action="confirm-delete-scenes">删除场景</button>`,
+        }<button class="danger" data-action="confirm-delete-scenes">删除节点</button>`,
       );
       break;
     }
     case "confirm-delete-scenes": {
       const entry = $("#new-entry")?.value || p().entryId;
-      mutate("删除场景", (p) => deleteScenes(p, pendingDelete, entry));
+      mutate("删除节点", (p) => deleteScenes(p, pendingDelete, entry));
       selected = p().entryId;
       board.selected = new Set([selected]);
       closePanel();
@@ -4113,8 +4467,8 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "create-connected": {
       const from = connectionEdit,
-        scene = createScene("新场景");
-      mutate("连接新场景", (p) =>
+        scene = createScene("新节点");
+      mutate("连接新节点", (p) =>
         set(
           p.scenes.find((x) => x.id === from.id),
           from.path,
@@ -4135,7 +4489,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       board.fit();
       break;
     case "locate-entry":
-      board.locate(LOADING);
+      board.locate(openingCard(p(), "loading")?.id || p().entryId);
       break;
     case "pan-mode":
       board.mode = "pan";
@@ -4151,7 +4505,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       openGraphNode([...board.selected][0]);
       break;
     case "save-flow-entry":
-      mutate("设置起始剧情", (p) => (p.entryId = $("#entry-target").value));
+      mutate("设置起始节点", (p) => (p.entryId = $("#entry-target").value));
       closePanel();
       break;
     case "edit-flow-edge": {
@@ -4188,6 +4542,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     }
     case "split-clip": {
+      assertTimelineUnlocked();
       let next;
       mutate("分割片段", () => {
         const c = currentClip();
@@ -4200,39 +4555,20 @@ async function workspaceAction(action, button = { dataset: {} }) {
     }
     case "clip-before":
     case "clip-after":
+      assertTimelineUnlocked();
       mutate("调整片段顺序", () =>
         reorderClip(s(), currentClip().id, action === "clip-before" ? -1 : 1),
       );
       break;
     case "copy-item": {
-      let copy;
-      if (["clip", "video", "image"].includes(selection.kind)) {
-        mutate("复制片段", () => (copy = duplicateClip(s(), currentClip().id)));
-        selection = { kind: "clip", id: copy.id };
-      } else {
-        const key = {
-          event: "events",
-          subtitle: "subtitles",
-          audio: "audio",
-          effect: "effects",
-          overlay: "overlays",
-        }[selection.kind];
-        if (!key) throw Error("请选择要复制的内容");
-        mutate("复制内容", () => {
-          copy = clone(selectObject());
-          copy.id = uid("item");
-          copy.options?.forEach((o) => (o.id = uid("option")));
-          s()[key].push(copy);
-          if (
-            ["subtitle", "overlay", "audio", "event"].includes(selection.kind)
-          )
-            assignTrack(s(), selection.kind, copy, copy.trackId);
-        });
-        selection.id = copy.id;
-      }
-      render();
+      assertTimelineUnlocked();
+      timelineClipboard = copySelection(s(), selectedTimelineIds());
+      notify("已复制，在目标时间粘贴即可");
       break;
     }
+    case "paste-item":
+      pasteTimelineCopied();
+      break;
     case "confirm-delete-clip": {
       const ripple = $("#delete-ripple").value === "yes",
         linkedDelete = $("#delete-linked")?.checked || false;
@@ -4273,7 +4609,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "help":
       panel(
-        "<h2>快捷操作</h2><p>双击场景进入编辑；拖动空白处移动画布；按住 Shift 拖动可框选。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴拖动片段或两端调整时间，方向键微调 0.1 秒。</p>",
+        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处框选节点；按住空格或鼠标中键拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段只能整体移动，时间范围在右侧设置。</p>",
       );
       break;
     case "preview-desktop":
@@ -4508,14 +4844,14 @@ function connectFlow(project, id, path, target) {
   if (id === LOADING) throw Error("加载完成后固定进入开屏");
   const sourceNode = project.scenes.find((s) => s.id === id),
     targetNode = project.scenes.find((s) => s.id === target);
-  if (targetNode?.role === "loading") throw Error("加载卡片只用于作品启动");
+  if (targetNode?.role === "loading") throw Error("加载节点只用于作品启动");
   if (sourceNode?.role === "splash" && openingRole(targetNode))
-    throw Error("开屏请连接剧情卡片");
+    throw Error("开屏请连接剧情节点");
   if (
     sourceNode?.role === "loading" &&
     !["splash", "story"].includes(targetNode?.role)
   )
-    throw Error("加载请连接开屏或剧情卡片");
+    throw Error("加载请连接开屏或剧情节点");
   if (target === LOADING) throw Error("加载节点只用于作品入口");
   if (id === SPLASH) {
     if (specialNode(target)) throw Error("开屏需要连接普通剧情");
@@ -4523,9 +4859,9 @@ function connectFlow(project, id, path, target) {
     return;
   }
   const scene = project.scenes.find((s) => s.id === id);
-  if (!scene) throw Error("源场景不存在");
+  if (!scene) throw Error("源节点不存在");
   if (!specialNode(target) && !project.scenes.some((s) => s.id === target))
-    throw Error("目标场景不存在");
+    throw Error("目标节点不存在");
   if (path === "next") {
     setCardNext(project, id, { kind: "scene", sceneId: target });
     return;
@@ -4552,7 +4888,7 @@ function disconnectFlow() {
   const edge = board.activeEdge;
   if (!edge) return;
   if (specialNode(edge.from)) {
-    notify("入口连接需保留，可更换起始剧情");
+    notify("入口连接需保留，可更换起始节点");
     return;
   }
   mutate("断开连接", (p) =>
@@ -4674,10 +5010,12 @@ function beginTimelineScrub(e) {
   );
   const finish = () => {
     controller.abort();
+    cancelTimelineGesture = null;
     cancelAnimationFrame(frame);
     scroll.classList.remove("scrubbing");
     paintStill();
   };
+  cancelTimelineGesture = finish;
   window.addEventListener("pointerup", finish, {
     once: true,
     signal: controller.signal,
@@ -4725,14 +5063,18 @@ function timelineWheel(e) {
 }
 function previewKeys(e) {
   if (
+    e.defaultPrevented ||
     page !== "story" ||
     graph ||
-    e.target.closest('input,textarea,select,[contenteditable="true"]') ||
+    e.target.closest(
+      'input:not([type="range"]),textarea,select,[contenteditable="true"]',
+    ) ||
     document.querySelector("dialog[open]")
   )
     return;
   if (e.code === "Space") {
     e.preventDefault();
+    if (e.repeat) return;
     toggleTimelinePlayback();
   } else if (
     ["ArrowLeft", "ArrowRight"].includes(e.key) &&
@@ -4743,16 +5085,78 @@ function previewKeys(e) {
     e.preventDefault();
     stopTimelinePlayback();
     time = clamp(
-      time + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 100),
+      time + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 1000 / 30),
       0,
       editableDuration(),
     );
     updatePlayhead();
     queueStill();
     followPlayhead();
+  } else if (e.key === "Escape") {
+    cancelTimelineGesture?.();
+    timelineSelection.clear();
+    selection = { kind: "scene" };
+    $(".timeline-context")?.remove();
+    renderTimeline();
+    renderInspector();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+    e.preventDefault();
+    timelineSelection.clear();
+    for (const clip of $(".timeline-scroll").querySelectorAll("[data-clip]"))
+      if (
+        !previewTracks().locked.has(clip.closest(".track").dataset.trackId) &&
+        clip.dataset.kind !== "opening"
+      )
+        timelineSelection.add(clip.dataset.clip);
+    renderTimeline();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+    try {
+      timelineClipboard = copySelection(s(), selectedTimelineIds());
+      e.preventDefault();
+    } catch (error) {
+      notify(error.message);
+    }
+  } else if (
+    (e.ctrlKey || e.metaKey) &&
+    e.key.toLowerCase() === "v" &&
+    timelineClipboard
+  ) {
+    e.preventDefault();
+    try {
+      pasteTimelineCopied();
+    } catch (error) {
+      notify(error.message);
+    }
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+    e.preventDefault();
+    handleAction("split-clip", { dataset: {} }).catch((error) =>
+      notify(error.message),
+    );
+  } else if (e.key === "Delete") {
+    e.preventDefault();
+    try {
+      deleteTimelineSelected();
+    } catch (error) {
+      notify(error.message);
+    }
   }
 }
 function timelineContext(e) {
+  const label = e.target.closest(".track-label");
+  if (label) {
+    e.preventDefault();
+    $(".timeline-context")?.remove();
+    const id = label.closest(".track").dataset.trackId;
+    const menu = document.createElement("div");
+    menu.className = "timeline-context";
+    menu.innerHTML = `<button data-action="track-lock" data-id="${esc(id)}">${previewTracks().locked.has(id) ? "解锁轨道" : "锁定轨道"}</button><button data-action="track-up" data-id="${esc(id)}">轨道上移</button><button data-action="track-down" data-id="${esc(id)}">轨道下移</button>`;
+    document.body.append(menu);
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 220) + "px";
+    menu.style.top =
+      Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8) + "px";
+    menu.onclick = () => menu.remove();
+    return;
+  }
   const clip = e.target.closest("[data-clip]");
   if (!clip) return;
   e.preventDefault();
@@ -4774,7 +5178,11 @@ function timelineContext(e) {
     ["copy-item", "复制", selection.kind === "opening"],
     ["delete-item", "删除", false],
     ["align-start", "开始位置对齐播放头", selection.kind === "opening"],
-    ["align-end", "结束位置对齐播放头", selection.kind === "opening"],
+    [
+      "align-end",
+      "结束位置对齐播放头",
+      ["opening", "event"].includes(selection.kind),
+    ],
     ...(main ? [["lift-selected", "提到叠加轨道", false]] : []),
   ];
   const menu = document.createElement("div");
@@ -4794,4 +5202,415 @@ function timelineContext(e) {
       Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8),
     ) + "px";
   menu.addEventListener("click", () => menu.remove());
+}
+
+// One editing workspace: media above, timeline across the entire bottom.
+function setupEditingLayout() {
+  const timeline = document.createElement("section");
+  timeline.className = "timeline-dock";
+  timeline.setAttribute("aria-label", "节点时间轴");
+  const grip = document.createElement("div");
+  grip.className = "panel-resize timeline-resize";
+  grip.dataset.resize = "timeline";
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-label", "调整时间轴高度");
+  timeline.append(grip, $(".timeline-head"), $(".timeline-scroll"));
+  $(".layout").append(timeline);
+  $(".timeline-actions").remove();
+  const undo = document.createElement("button"),
+    redo = document.createElement("button");
+  undo.dataset.action = "undo";
+  undo.textContent = "↶";
+  undo.title = "撤销 Ctrl+Z";
+  undo.setAttribute("aria-label", "撤销");
+  redo.dataset.action = "redo";
+  redo.textContent = "↷";
+  redo.title = "重做 Ctrl+Shift+Z";
+  redo.setAttribute("aria-label", "重做");
+  $(".clip-tools").prepend(undo, redo);
+  for (const [host, name, label] of [
+    [".library", "library", "调整素材区宽度"],
+    [".inspector", "inspector", "调整属性区宽度"],
+  ]) {
+    const handle = document.createElement("div");
+    handle.className = `panel-resize ${name}-resize`;
+    handle.dataset.resize = name;
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-label", label);
+    $(".layout").append(handle);
+  }
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem("talespark-panel-sizes") || "{}",
+    );
+    for (const [key, value] of Object.entries(saved))
+      if (
+        ["library", "inspector", "timeline"].includes(key) &&
+        Number.isFinite(value)
+      )
+        document.body.style.setProperty(
+          `--${key}-size`,
+          clamp(value, 180, 600) + "px",
+        );
+  } catch {}
+  document.addEventListener("pointerdown", (e) => {
+    const handle = e.target.closest("[data-resize]");
+    if (!handle || document.body.dataset.view !== "scene" || e.button !== 0)
+      return;
+    e.preventDefault();
+    const name = handle.dataset.resize,
+      host = name === "timeline" ? timeline : $("." + name);
+    const size = name === "timeline" ? host.offsetHeight : host.offsetWidth,
+      start = name === "timeline" ? e.clientY : e.clientX;
+    const controller = new AbortController();
+    document.body.classList.add("resizing-panels");
+    const move = (ev) => {
+      const delta = (name === "timeline" ? ev.clientY : ev.clientX) - start;
+      const max =
+        name === "timeline"
+          ? Math.max(180, window.innerHeight - 350)
+          : Math.max(220, (window.innerWidth - 440) / 2);
+      document.body.style.setProperty(
+        `--${name}-size`,
+        clamp(
+          size + delta * (name === "library" ? 1 : -1),
+          name === "timeline" ? 180 : 220,
+          max,
+        ) + "px",
+      );
+    };
+    const finish = () => {
+      controller.abort();
+      document.body.classList.remove("resizing-panels");
+      const saved = Object.fromEntries(
+        ["library", "inspector", "timeline"]
+          .map((key) => [
+            key,
+            parseFloat(
+              getComputedStyle(document.body).getPropertyValue(`--${key}-size`),
+            ),
+          ])
+          .filter(([, n]) => Number.isFinite(n)),
+      );
+      localStorage.setItem("talespark-panel-sizes", JSON.stringify(saved));
+    };
+    window.addEventListener("pointermove", move, { signal: controller.signal });
+    window.addEventListener("pointerup", finish, {
+      once: true,
+      signal: controller.signal,
+    });
+    window.addEventListener("pointercancel", finish, {
+      once: true,
+      signal: controller.signal,
+    });
+  });
+}
+function revealTimelineItem(id) {
+  const clip = [...$(".timeline-scroll").querySelectorAll("[data-clip]")].find(
+    (el) => el.dataset.clip === id,
+  );
+  if (!clip) return;
+  const scroll = $(".timeline-scroll"),
+    a = clip.getBoundingClientRect(),
+    b = scroll.getBoundingClientRect();
+  if (a.left < b.left + 70) scroll.scrollLeft -= b.left + 82 - a.left;
+  else if (a.right > b.right) scroll.scrollLeft += a.right - b.right + 12;
+  if (a.top < b.top + 26) scroll.scrollTop -= b.top + 38 - a.top;
+  else if (a.bottom > b.bottom) scroll.scrollTop += a.bottom - b.bottom + 12;
+}
+function markPreviewSelection() {
+  for (const el of $(".canvas").querySelectorAll(
+    "[data-edit-event],[data-edit-item]",
+  ))
+    el.classList.toggle(
+      "editor-selected",
+      (el.dataset.editEvent || el.dataset.editItem) === selection.id,
+    );
+}
+function organizeProperties(panel) {
+  if (page !== "story" || graph) return;
+  const key = `${selected}:${selection.kind}:${selection.id || "node"}`;
+  const type = selection.kind;
+  const labels =
+    type === "event"
+      ? { appearance: "外观", interaction: "交互", story: "剧情" }
+      : type === "subtitle"
+        ? { appearance: "文本与样式", timing: "时间" }
+        : type === "audio"
+          ? { audio: "音频", timing: "时间" }
+          : ["clip", "video", "image", "overlay"].includes(type)
+            ? { appearance: "画面", timing: "时间", audio: "音频" }
+            : null;
+  if (!labels) return;
+  const groups = Object.fromEntries(
+    Object.keys(labels).map((k) => {
+      const el = document.createElement("section");
+      el.className = "property-section";
+      el.dataset.propertySection = k;
+      return [k, el];
+    }),
+  );
+  const classify = (path) => {
+    if (type === "event") {
+      if (
+        /^(success|failure|condition|linkedClipId)(\.|$)|^options\.\d+\.(target|actions|condition)/.test(
+          path,
+        )
+      )
+        return "story";
+      if (
+        /^(hint|x|y|scale|sound|volume|uiComponent|entryMotion)(\.|$)|^options\.\d+\.(text|x|y)/.test(
+          path,
+        )
+      )
+        return "appearance";
+      return "interaction";
+    }
+    if (/^(startMs|endMs|inMs|outMs|durationMs|linkedClipId)$/.test(path))
+      return "timing";
+    if (
+      /^(volume|fadeInMs|fadeOutMs)$/.test(path) ||
+      (type === "audio" && path === "assetId")
+    )
+      return "audio";
+    return type === "audio" ? "audio" : "appearance";
+  };
+  const children = [...panel.children],
+    heading = panel.querySelector("h2");
+  const extras = [];
+  const distribute = (node) => {
+    if (node === heading) return;
+    if (node.matches("h3")) {
+      if (type === "event" && /成功|失败|超时|选择后/.test(node.textContent))
+        groups.story.append(node);
+      return;
+    }
+    if (node.matches(".two")) {
+      [...node.children].forEach(distribute);
+      return;
+    }
+    if (
+      node.matches(".issues") ||
+      node.matches('[data-action="delete-item"]')
+    ) {
+      extras.push(node);
+      return;
+    }
+    const fields = [...node.querySelectorAll("[data-field]")];
+    let tab = fields.length
+      ? classify(fields[0].dataset.field)
+      : type === "event"
+        ? "appearance"
+        : Object.keys(labels)[0];
+    if (
+      node.matches('[data-action="add-option"]') ||
+      node.classList.contains("option-card")
+    )
+      tab = "story";
+    const path = node.querySelector("[data-path]")?.dataset.path;
+    if (type === "event" && path) tab = classify(path);
+    if (node.matches(".option-card")) {
+      const containers = {};
+      for (const child of [...node.children]) {
+        if (child.matches("h4")) continue;
+        const field = child.querySelector("[data-field]");
+        const target = field ? classify(field.dataset.field) : "story";
+        if (!containers[target]) {
+          containers[target] = document.createElement("div");
+          containers[target].className = "option-card";
+          containers[target].append(node.querySelector("h4").cloneNode(true));
+          groups[target].append(containers[target]);
+        }
+        containers[target].append(child);
+      }
+      return;
+    }
+    (groups[tab] || groups[Object.keys(labels)[0]]).append(node);
+  };
+  children.forEach(distribute);
+  const tabs = document.createElement("div");
+  tabs.className = "property-tabs";
+  tabs.setAttribute("role", "tablist");
+  const available = Object.keys(groups).filter(
+    (k) => groups[k].childElementCount,
+  );
+  let active = propertyTabs.get(key);
+  if (!available.includes(active)) active = available[0];
+  const activate = (tab) => {
+    propertyTabs.set(key, tab);
+    for (const button of tabs.children) {
+      button.setAttribute("aria-selected", String(button.dataset.tab === tab));
+      button.tabIndex = button.dataset.tab === tab ? 0 : -1;
+    }
+    for (const [name, group] of Object.entries(groups))
+      group.hidden = name !== tab;
+  };
+  for (const tab of available) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.tab = tab;
+    button.textContent = labels[tab];
+    button.setAttribute("role", "tab");
+    button.onclick = () => activate(tab);
+    tabs.append(button);
+  }
+  tabs.onkeydown = (e) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    e.preventDefault();
+    const index = available.indexOf(propertyTabs.get(key));
+    const next =
+      available[
+        (index + (e.key === "ArrowRight" ? 1 : -1) + available.length) %
+          available.length
+      ];
+    activate(next);
+    tabs.querySelector(`[data-tab="${next}"]`).focus();
+  };
+  panel.replaceChildren(
+    ...(heading ? [heading] : []),
+    tabs,
+    ...Object.values(groups),
+    ...extras,
+  );
+  activate(active);
+  if (type === "event") {
+    const item = items().find((x) => x.id === selection.id);
+    if (item && !(time >= item.start && time <= item.end)) {
+      const jump = document.createElement("button");
+      jump.className = "full locate-interaction";
+      jump.textContent = "定位到出现位置";
+      jump.onclick = () => {
+        stopTimelinePlayback();
+        time = item.start;
+        paintStill();
+        updatePlayhead();
+        renderInspector();
+        revealTimelineItem(item.id);
+      };
+      panel.insertBefore(jump, tabs);
+    }
+    const hint = document.createElement("p");
+    hint.className = "muted";
+    hint.textContent =
+      "固定时长互动：在时间轴整体移动，在这里设置出现范围和操作时限。";
+    groups.interaction.prepend(hint);
+  }
+  const grip = document.createElement("div");
+  grip.className = "panel-resize inspector-resize";
+  grip.dataset.resize = "inspector";
+  grip.setAttribute("role", "separator");
+  grip.setAttribute("aria-label", "调整属性区宽度");
+  try {
+    assertTimelineUnlocked();
+  } catch {
+    panel
+      .querySelectorAll("input,select,textarea,button:not([role=tab])")
+      .forEach((el) => (el.disabled = true));
+    const notice = document.createElement("p");
+    notice.className = "muted";
+    notice.textContent = "轨道已锁定，解锁后可调整素材。";
+    panel.prepend(notice);
+  }
+}
+async function paintTimelineMedia() {
+  const scene = s(),
+    project = p();
+  for (const el of $(".timeline-scroll").querySelectorAll("[data-clip]")) {
+    const kind = el.dataset.kind,
+      id = el.dataset.clip;
+    const item =
+      kind === "clip"
+        ? scene.clips.find((x) => x.id === id)
+        : kind === "video"
+          ? scene.video
+          : kind === "image"
+            ? scene.images.find((x) => x.id === id)
+            : kind === "audio"
+              ? scene.audio.find((x) => x.id === id)
+              : kind === "overlay"
+                ? scene.overlays.find((x) => x.id === id)
+                : null;
+    const asset = project.assets[item?.assetId];
+    if (!asset || el.offsetWidth < 65) continue;
+    try {
+      if (kind === "audio") {
+        const url = await assets.url(asset),
+          waveform = await audioWaveform(
+            url,
+            item.inMs || 0,
+            item.endMs - item.startMs,
+          );
+        if (!el.isConnected) continue;
+        if (waveform) {
+          const picture = document.createElement("img");
+          picture.className = "clip-waveform";
+          picture.alt = "音频波形";
+          picture.src = waveform;
+          el.prepend(picture);
+        }
+      } else {
+        const url = await assets.url(asset),
+          thumbnail = await timelineThumbnail(url, asset.kind);
+        if (!el.isConnected) continue;
+        const picture = document.createElement("img");
+        picture.className = "clip-thumbnail";
+        picture.alt = "";
+        picture.src = thumbnail;
+        el.prepend(picture);
+      }
+    } catch {}
+  }
+}
+
+function deleteTimelineSelected() {
+  assertTimelineUnlocked();
+  if (selection.kind === "opening") {
+    mutate("隐藏开场元素", () => (selectObject().hidden = true));
+    return;
+  }
+  const ids = selectedTimelineIds();
+  if (!ids.size) return;
+  mutate("删除选中片段", () => {
+    ensureSequence(s());
+    for (const id of ids)
+      if (s().clips.some((x) => x.id === id)) removeClip(s(), id, false, false);
+    for (const key of ["events", "subtitles", "overlays", "audio", "effects"])
+      s()[key] = s()[key].filter((x) => !ids.has(x.id));
+  });
+  timelineSelection.clear();
+  selection = { kind: "scene" };
+  render();
+}
+function pasteTimelineCopied() {
+  if (!timelineClipboard) {
+    notify("请先复制素材");
+    return;
+  }
+  if (
+    previewTracks().locked.has("main") &&
+    timelineClipboard.entries.some((x) => x.key === "clips")
+  )
+    throw Error("主画面轨道已锁定");
+  const kinds = {
+    events: "event",
+    subtitles: "subtitle",
+    audio: "audio",
+    effects: "effect",
+    overlays: "overlay",
+    clips: "clip",
+  };
+  let entries;
+  mutate("粘贴片段", () => {
+    entries = pasteSelection(s(), timelineClipboard, time, () => uid("item"));
+    for (const x of entries)
+      if (["events", "subtitles", "audio", "overlays"].includes(x.key)) {
+        if (previewTracks().locked.has(x.item.trackId)) delete x.item.trackId;
+        assignTrack(s(), kinds[x.key], x.item, x.item.trackId);
+      }
+  });
+  timelineSelection.clear();
+  entries.forEach((x) => timelineSelection.add(x.item.id));
+  selection = { kind: kinds[entries[0].key], id: entries[0].item.id };
+  render();
+  revealTimelineItem(selection.id);
 }

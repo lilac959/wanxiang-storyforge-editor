@@ -26,7 +26,7 @@ export class StoryBoard {
     this.api = api;
     this.scale = 1;
     this.selected = new Set();
-    this.mode = "pan";
+    this.mode = "select";
     this.pending = null;
     this.cards = new Map();
     this.edges = new Map();
@@ -156,7 +156,7 @@ export class StoryBoard {
       }
       el.setAttribute(
         "aria-label",
-        (specialNode(n.id) ? "特殊节点 " : "场景 ") + n.name,
+        (specialNode(n.id) ? "特殊节点 " : "节点 ") + n.name,
       );
       el.querySelector("h3").textContent = n.name;
       el.querySelector("h3").title = n.name;
@@ -209,7 +209,7 @@ export class StoryBoard {
           ? n.name
           : n.role === "ending"
             ? "结局"
-            : "场景";
+            : "节点";
         if (a)
           this.api
             .assetUrl(a)

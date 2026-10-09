@@ -1,10 +1,18 @@
+import { audioVolume } from "./audio-envelope.mjs";
 import { visualLayer, itemTrackId } from "./tracks.mjs";
 import { GESTURE_PATHS } from "./ui-components.mjs";
 import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
-import { duration, clamp, gestures, openingRole } from "./model.mjs";
+import {
+  duration,
+  clamp,
+  gestures,
+  openingRole,
+  openingCard,
+} from "./model.mjs";
 import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
+import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
 
 export class PlayerView {
   constructor(
@@ -12,6 +20,8 @@ export class PlayerView {
     assets,
     {
       onExit = () => {},
+      onHome = null,
+      canExit = false,
       onChange = () => {},
       editing = false,
       onSelect = () => {},
@@ -20,6 +30,7 @@ export class PlayerView {
     this.root = root;
     this.assets = assets;
     this.onExit = onExit;
+    this.onHome = onHome;
     this.onChange = onChange;
     this.editing = editing;
     this.onSelect = onSelect;
@@ -34,6 +45,10 @@ export class PlayerView {
     root.innerHTML =
       '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden><section class="play-controls" role="dialog" aria-modal="true" aria-label="播放设置"><header>设置<button data-player="close-settings" aria-label="关闭设置">×</button></header><div class="settings-options"><button data-player="pause">继续</button><button data-player="sound">声音开</button><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button><button data-player="fullscreen">全屏</button></div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" hidden></span></section></div>';
     this.stage = root.querySelector(".play-stage");
+    this.menuMarkup(canExit);
+    this.stageObserver = new ResizeObserver(() => this.fitStage());
+    this.stageObserver.observe(root);
+    this.fitStage();
     this.visual = root.querySelector(".visual");
     this.hud = root.querySelector(".interaction");
     this.message = root.querySelector(".play-message");
@@ -89,7 +104,7 @@ export class PlayerView {
         if (command === "settings") this.openSettings();
         if (command === "close-settings" || command === "pause")
           this.closeSettings(command === "pause");
-        if (command === "restart" || command === "exit") {
+        if (["restart", "home", "exit"].includes(command)) {
           if (!this.menuOpen) this.openSettings();
           this.confirmAction = command;
           this.menu.querySelector(".settings-options").hidden = true;
@@ -97,7 +112,9 @@ export class PlayerView {
           this.menu.querySelector(".settings-confirm p").textContent =
             command === "restart"
               ? "重新开始会清除本次进度，确定重新开始？"
-              : "返回开屏会结束本次游玩，确定返回？";
+              : command === "home"
+                ? "结束本次游玩，返回开始页？"
+                : "退出试玩，返回编辑器？";
           this.menu.querySelector('[data-player="cancel-action"]').focus();
         }
         if (command === "cancel-action") {
@@ -108,7 +125,14 @@ export class PlayerView {
           const action = this.confirmAction;
           this.closeSettings(false, false);
           if (action === "restart") this.start(this.project);
-          else if (action === "exit") {
+          else if (action === "home") {
+            if (this.onHome) this.onHome();
+            else
+              this.start(
+                this.project,
+                openingCard(this.project, "splash")?.id || this.project.entryId,
+              );
+          } else if (action === "exit") {
             this.stop();
             this.onExit();
           }
@@ -117,16 +141,28 @@ export class PlayerView {
           this.muted = !this.muted;
           if (this.video) this.video.muted = this.muted;
           for (const a of this.audio.values()) a.muted = this.muted;
-          e.target.textContent = this.muted ? "声音关" : "声音开";
+          const sound = this.root.querySelector('[data-player="sound"]');
+          sound.setAttribute("aria-pressed", String(!this.muted));
+          sound.querySelector(".sound-state").textContent = this.muted
+            ? "关闭"
+            : "开启";
           if (this.muted) qteAudio.stop();
         }
         if (command === "fullscreen") {
           const task = document.fullscreenElement
             ? document.exitFullscreen()
             : this.root.requestFullscreen();
-          task?.catch(() => {
-            e.target.textContent = "当前无法全屏";
-          });
+          task
+            ?.then(() => {
+              this.root.querySelector(
+                '[data-player="fullscreen"] span',
+              ).textContent = document.fullscreenElement
+                ? "退出全屏"
+                : "进入全屏";
+            })
+            .catch(() => {
+              this.status("当前设备无法进入全屏");
+            });
         }
         return;
       }
@@ -164,9 +200,36 @@ export class PlayerView {
         x: e.clientX,
         y: e.clientY,
         began: this.runtime.active.elapsedMs,
+        scale: this.stageScale,
       };
+      this.hud.querySelector(".qte")?.classList.add("qte-input");
       this.stage.setPointerCapture?.(e.pointerId);
       qteAudio.input(event.gesture);
+    };
+    this.move = (e) => {
+      const active = this.runtime?.active;
+      if (
+        !this.pointer ||
+        this.pointer.id !== e.pointerId ||
+        !active ||
+        !this.runtime.playing
+      )
+        return;
+      const event = active.event;
+      if (!["left", "right", "up", "down"].includes(event.gesture)) return;
+      active.progress = swipeProgress(
+        event.gesture,
+        e.clientX - this.pointer.x,
+        e.clientY - this.pointer.y,
+        event.distance,
+        this.pointer.scale,
+      );
+      if (!this.muted) qteAudio.progress(active.progress);
+      this.paintHud();
+      if (active.progress >= 1) {
+        this.pointer = null;
+        this.runtime.resolve(true);
+      }
     };
     this.up = (e) => {
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
@@ -177,29 +240,25 @@ export class PlayerView {
       const event = active.event,
         dx = e.clientX - p.x,
         dy = e.clientY - p.y,
-        dist = Math.hypot(dx, dy);
+        dist = Math.hypot(dx, dy) / Math.max(0.001, p.scale * 2);
+      this.hud.querySelector(".qte")?.classList.remove("qte-input");
       if (event.gesture === "click" && dist < 20) this.runtime.resolve(true);
       else if (event.gesture === "multi" && dist < 20) {
         active.clicks = (active.clicks || 0) + 1;
         active.progress = active.clicks / event.clicks;
         if (active.clicks >= event.clicks) this.runtime.resolve(true);
       } else if (["left", "right", "up", "down"].includes(event.gesture)) {
-        const delta = { left: -dx, right: dx, up: -dy, down: dy }[
-          event.gesture
-        ];
-        if (
-          delta >= event.distance &&
-          (["left", "right"].includes(event.gesture)
-            ? Math.abs(dx) > Math.abs(dy)
-            : Math.abs(dy) > Math.abs(dx))
-        )
+        if (swipeProgress(event.gesture, dx, dy, event.distance, p.scale) >= 1)
           this.runtime.resolve(true);
+        else active.progress = 0;
       } else if (event.gesture === "hold") active.progress = 0;
       this.paintHud();
     };
     this.cancel = () => {
       this.pointer = null;
       if (this.runtime?.active) this.runtime.active.progress = 0;
+      this.hud.querySelector(".qte")?.classList.remove("qte-input");
+      this.paintHud();
     };
     this.visibility = () => {
       if (document.hidden && !this.editing) this.openSettings();
@@ -209,11 +268,50 @@ export class PlayerView {
       if (!this.editing) this.openSettings();
     };
     this.stage.addEventListener("pointerdown", this.down);
+    this.stage.addEventListener("pointermove", this.move);
     this.stage.addEventListener("pointerup", this.up);
     this.stage.addEventListener("pointercancel", this.cancel);
     window.addEventListener("blur", this.blur);
     document.addEventListener("visibilitychange", this.visibility);
     this.frame = requestAnimationFrame((t) => this.loop(t));
+  }
+  menuMarkup(canExit) {
+    const icon = (paths) =>
+      `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+    const icons = {
+      menu: icon('<path d="M4 6h16M4 12h16M4 18h16"/>'),
+      close: icon('<path d="m6 6 12 12M18 6 6 18"/>'),
+      play: icon('<path d="m8 5 11 7-11 7Z"/>'),
+      sound: icon('<path d="M4 9h4l5-4v14l-5-4H4Z M17 8a6 6 0 0 1 0 8"/>'),
+      restart: icon('<path d="M4 10a8 8 0 1 1 1 7M4 4v6h6"/>'),
+      home: icon('<path d="m3 11 9-8 9 8M5 10v11h14V10M10 21v-7h4v7"/>'),
+      full: icon('<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>'),
+      exit: icon('<path d="M9 4H4v16h5M9 12h12m-4-4 4 4-4 4"/>'),
+    };
+    const button = (key, text) =>
+      `<button data-player="${key}"${key === "sound" ? ' aria-pressed="true"' : ""}>${icons[key === "pause" ? "play" : key === "fullscreen" ? "full" : key]}<span>${text}</span>${key === "sound" ? '<b class="sound-state">开启</b>' : ""}</button>`;
+    this.root.querySelector(".settings-toggle").innerHTML = icons.menu;
+    this.root
+      .querySelector(".settings-toggle")
+      .setAttribute("aria-label", "播放菜单");
+    this.root.querySelector(".settings-shade").innerHTML =
+      `<section class="play-controls" role="dialog" aria-modal="true" aria-label="播放菜单"><header><span>播放菜单</span><button data-player="close-settings" aria-label="关闭播放菜单">${icons.close}</button></header><div class="settings-options">${button("pause", "继续游玩")}${button("sound", "声音")}${button("restart", "从头开始")}${button("home", "返回开始页")}${button("fullscreen", "进入全屏")}${canExit ? button("exit", "退出试玩") : ""}</div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" role="status"></span></section>`;
+  }
+  fitStage() {
+    const media = this.visual?.querySelector("video,img");
+    const ratio =
+      (media?.videoWidth || media?.naturalWidth || 16) /
+      (media?.videoHeight || media?.naturalHeight || 9);
+    const fit = fittedStage(
+      this.root.clientWidth,
+      this.root.clientHeight,
+      ratio,
+    );
+    this.stageScale = fit.scale;
+    this.stage.style.width = fit.width + "px";
+    this.stage.style.height = fit.height + "px";
+    this.stage.style.transform = `translate(-50%, -50%) scale(${fit.scale})`;
+    this.fitOpeningLayer();
   }
   showSettingsButton() {
     if (this.editing) return;
@@ -240,7 +338,8 @@ export class PlayerView {
     this.settingsButton.setAttribute("aria-expanded", "true");
     this.stage.inert = true;
     this.showSettingsButton();
-    this.menu.querySelector('[data-player="pause"]').textContent = "继续";
+    this.menu.querySelector('[data-player="pause"] span').textContent =
+      "继续游玩";
     this.menu.querySelector('[data-player="pause"]').focus();
   }
   closeSettings(forceResume = false, restore = true) {
@@ -303,6 +402,7 @@ export class PlayerView {
   }
   dispose() {
     this.openingObserver?.disconnect();
+    this.stageObserver?.disconnect();
     this.stop();
     this.disposed = true;
     clearTimeout(this.settingsTimer);
@@ -312,6 +412,7 @@ export class PlayerView {
     cancelAnimationFrame(this.frame);
     this.root.removeEventListener("click", this.clickHandler);
     this.stage.removeEventListener("pointerdown", this.down);
+    this.stage.removeEventListener("pointermove", this.move);
     this.stage.removeEventListener("pointerup", this.up);
     this.stage.removeEventListener("pointercancel", this.cancel);
     window.removeEventListener("blur", this.blur);
@@ -387,7 +488,7 @@ export class PlayerView {
       if (audio.readyState && Math.abs(audio.currentTime - wanted) > 0.2)
         audio.currentTime = wanted;
       audio.playbackRate = this.timelineRate || 1;
-      audio.volume = clamp(clip.volume ?? 1, 0, 1);
+      audio.volume = audioVolume(clip, time);
       if (audio.paused) audio.play().catch(() => {});
     }
   }
@@ -434,6 +535,7 @@ export class PlayerView {
           };
           v.onloadedmetadata = () => {
             clean();
+            this.fitStage();
             resolve();
           };
           v.onerror = () => {
@@ -449,12 +551,12 @@ export class PlayerView {
         });
         if (token !== this.token) return;
         if (current.outMs > v.duration * 1000 + 100)
-          throw Error("视频时长短于段落设置，请检查素材与出点");
+          throw Error("视频时长短于节点设置，请检查素材与出点");
         v.currentTime =
           (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
         v.onerror = () => {
           if (token === this.token)
-            this.showError("视频播放中断，请重新加载当前段落");
+            this.showError("视频播放中断，请重新加载当前节点");
         };
         v.onwaiting = () => {
           if (token === this.token) {
@@ -477,6 +579,7 @@ export class PlayerView {
         img.alt = scene.name;
         this.visual.append(img);
         this.image = img;
+        img.onload = () => this.fitStage();
         if (scene.source === "sequence")
           img.src = await this.assets.url(this.project.assets[current.assetId]);
         else await this.paintImage(scene, time, token);
@@ -604,7 +707,7 @@ export class PlayerView {
       this.hud.innerHTML = "";
       this.message.hidden = false;
       this.message.innerHTML =
-        '<h2>故事告一段落</h2><p>你可以重新开始，探索另一条路线。</p><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button>';
+        '<h2>故事告一节点</h2><p>你可以重新开始，探索另一条路线。</p><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button>';
     }
     if (event.type === "stop") this.cleanupMedia();
     if (runtime.scene && runtime.state === "playing") {
@@ -613,8 +716,8 @@ export class PlayerView {
       this.paintHud();
       this.syncMedia();
     }
-    this.root.querySelector('[data-player="pause"]').textContent =
-      runtime.playing ? "暂停" : "继续";
+    this.root.querySelector('[data-player="pause"] span').textContent =
+      "继续游玩";
     this.onChange(event, runtime);
   }
   startSound(e) {
@@ -697,7 +800,7 @@ export class PlayerView {
       )
         a.currentTime = wanted;
       a.playbackRate = r.rate;
-      a.volume = clip.volume;
+      a.volume = audioVolume(clip, r.timeMs);
       if (a.paused) a.play().catch(() => {});
     }
   }
@@ -818,7 +921,7 @@ export class PlayerView {
     const html = captions
       .map(
         (c) =>
-          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="z-index:${visualLayer(scene, c)};left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
+          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="opacity:${c.entryMotion === "fade" ? clamp((time - c.startMs) / 250, 0, 1) : 1};z-index:${visualLayer(scene, c)};left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
       )
       .join("");
     const host = this.root.querySelector(".captions");
@@ -933,6 +1036,9 @@ export class PlayerView {
     this.hud.innerHTML = "";
     this.eventId = event?.id;
     if (!event) return;
+    this.hud.dataset.entryMotion = ["fade", "none"].includes(event.entryMotion)
+      ? event.entryMotion
+      : "classic";
     const edit = this.editing ? `data-edit-event="${esc(event.id)}"` : "";
     if (event.kind === "choice") {
       const opts = this.editing ? event.options : this.runtime.visibleOptions();
@@ -966,9 +1072,13 @@ export class PlayerView {
       el.querySelectorAll(".qte-segments i").forEach((segment, i) =>
         segment.classList.toggle("filled", i < (active.clicks || 0)),
       );
+      el.querySelector(".qte-count").classList.toggle(
+        "sr-only",
+        remaining === null,
+      );
       el.querySelector(".qte-count").textContent =
         e.gesture === "multi"
-          ? `${active.clicks || 0} / ${e.clicks}`
+          ? `${active.clicks || 0} / ${e.clicks}${remaining === null ? "" : " · " + (remaining / 1000).toFixed(1) + " 秒"}`
           : remaining === null
             ? ""
             : `${(remaining / 1000).toFixed(1)} 秒`;
@@ -1020,7 +1130,7 @@ export class PlayerView {
     this.pauseMedia();
     this.runtime?.pause();
     this.message.hidden = false;
-    this.message.innerHTML = `<h3>播放暂时中断</h3><p>${esc(text)}</p>${this.editing ? "" : '<button data-retry>重试当前段落</button><button data-player="exit">返回开屏</button>'}`;
+    this.message.innerHTML = `<h3>播放暂时中断</h3><p>${esc(text)}</p>${this.editing ? "" : '<button data-retry>重试当前节点</button><button data-player="exit">返回开屏</button>'}`;
     this.message
       .querySelector("[data-retry]")
       ?.addEventListener("click", () => {

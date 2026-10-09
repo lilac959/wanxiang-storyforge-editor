@@ -118,7 +118,7 @@ export function describeIssues(
     const asset = project.assets[issue.assetId || item?.assetId];
     let title = issue.message,
       detail = "",
-      action = issue.itemId ? "前往对应内容" : "前往卡片";
+      action = issue.itemId ? "前往对应内容" : "前往节点";
     let view = "editor";
     const label =
       asset?.name ||
@@ -147,33 +147,33 @@ export function describeIssues(
       detail = `「${eventName(other)}」（${seconds(other?.startMs)}～${seconds(other?.endMs)}）与「${eventName(item)}」（${seconds(item?.startMs)}～${seconds(item?.endMs)}）重叠。当前播放器一次接收一个互动，请决定调整哪一个。字幕、叠加图片和音效可同时出现。`;
       action = "前往互动时间轴";
     } else if (
-      /未连接的剧情出口|连接的剧情段落不存在|剧情去向无效/.test(title)
+      /未连接的剧情出口|连接的剧情节点不存在|剧情去向无效/.test(title)
     ) {
       title = /不存在/.test(title)
-        ? "出口连接的卡片已不存在"
+        ? "出口连接的节点已不存在"
         : "剧情出口还没有确定去向";
-      detail = `${label ? `「${label}」：` : "播放结束后："}请连接后续卡片，或明确设为结束作品、继续播放。系统不会替你选择剧情走向。`;
-      action = "查看卡片出口";
+      detail = `${label ? `「${label}」：` : "播放结束后："}请连接后续节点，或明确设为结束作品、继续播放。系统不会替你选择剧情走向。`;
+      action = "查看节点出口";
       view = "graph";
     } else if (title === "剧情时长无效") {
-      title = "卡片没有有效的播放时长";
+      title = "节点没有有效的播放时长";
       detail = `当前时长 ${seconds(s && duration(s))}。请添加画面，或检查已有片段的时间。`;
     } else if (/无法到达/.test(title)) {
-      title = "这张卡片没有接入起始剧情";
+      title = "这张节点没有接入起始节点";
       detail =
         "如果这是备用内容，可以保留；如果需要在作品中出现，请连接到已有剧情。";
       view = "graph";
-      action = "查看卡片连接";
+      action = "查看节点连接";
     } else if (/互动时间|视频位置结束|长按时长/.test(title)) {
       detail = `${label || "互动"}：开始 ${seconds(item?.startMs)}，结束 ${seconds(item?.endMs)}。请检查互动区间、结束方式及操作时限。`;
       action = "前往互动时间轴";
     } else if (/素材引用|素材类型/.test(title)) {
       detail = `${label || "使用的素材"}无法对应到有效素材。请替换素材或删除这个片段。`;
     } else if (/缺少.*素材|缺少视频或图片/.test(title)) {
-      title = "这张卡片还没有添加画面";
+      title = "这张节点还没有添加画面";
       detail =
-        "请进入卡片，将视频或图片从素材库拖到画面轨道。完成内容后，再取消待配置标记。";
-      action = "进入卡片添加画面";
+        "请进入节点，将视频或图片从素材库拖到画面轨道。完成内容后，再取消待配置标记。";
+      action = "进入节点添加画面";
     } else if (/占位选项文字/.test(title)) {
       title = "选项文字还没有填写完成";
       detail =
@@ -183,7 +183,7 @@ export function describeIssues(
         "请检查变量是否已创建，以及条件或结果动作使用的值是否与变量类型一致。";
       view = issue.sceneId ? "editor" : "variables";
     } else {
-      detail = `${label ? `对应内容：${label}。` : ""}请检查${issue.sceneId ? "这张卡片的对应配置" : "作品的对应配置"}；系统保留原内容，等待你决定。`;
+      detail = `${label ? `对应内容：${label}。` : ""}请检查${issue.sceneId ? "这张节点的对应配置" : "作品的对应配置"}；系统保留原内容，等待你决定。`;
     }
     return {
       ...issue,

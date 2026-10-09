@@ -130,7 +130,7 @@ test("invalid opening roles, layout and loading cycles cannot pass validation", 
   load.opening.layout = {
     title: { x: -1, y: 50, size: 40, width: 50, color: "#ffffff" },
   };
-  assert.ok(validate(p).some((x) => x.message === "开场卡片连接无效"));
+  assert.ok(validate(p).some((x) => x.message === "开场节点连接无效"));
   assert.ok(validate(p).some((x) => x.message === "开场元素位置或样式无效"));
   const splash = openingCard(p, "splash");
   splash.opening.elements.start.hidden = true;

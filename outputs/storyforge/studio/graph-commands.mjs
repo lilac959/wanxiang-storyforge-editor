@@ -48,7 +48,7 @@ export function copyScenes(project, ids) {
 }
 export function deleteScenes(project, ids, newEntry) {
   const keep = project.scenes.filter((s) => !ids.includes(s.id));
-  if (!keep.length) throw Error("至少保留一个场景");
+  if (!keep.length) throw Error("至少保留一个节点");
   if (ids.includes(project.entryId)) {
     if (
       !keep.some(

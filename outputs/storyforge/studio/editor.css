@@ -740,6 +740,57 @@ details > summary:after {
   color: #745bf0;
   background: #eee9ff;
 }
+
+#studio .timeline-scroll .track-controls {
+  gap: 4px;
+  min-height: 24px;
+  align-items: center;
+}
+#studio .timeline-scroll .track-controls button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 0;
+  font-size: 14px;
+}
+#studio .timeline-scroll .track-controls svg {
+  width: 17px;
+  height: 17px;
+}
+.timeline-selection-box {
+  position: absolute;
+  border: 1px solid #7964ed;
+  background: #7964ed18;
+  pointer-events: none;
+  z-index: 15;
+}
+.projects-page {
+  padding: 28px;
+  overflow: auto;
+  min-height: 0;
+}
+body[data-view="projects"] .layout {
+  grid-template-columns: 66px minmax(0, 1fr);
+}
+body[data-view="projects"] .library,
+body[data-view="projects"] .inspector {
+  display: none;
+}
+body[data-view="projects"] .workspace {
+  display: block;
+  overflow: auto;
+}
+.graph-view-menu > div {
+  bottom: calc(100% + 8px);
+  top: auto;
+}
+.graph-view-menu [aria-pressed="true"]::before {
+  content: "✓ ";
+}
 .preview-hidden .clip {
   opacity: 0.4;
 }
@@ -1968,10 +2019,10 @@ body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
 }
 #panel .component-preview .settings-toggle {
   position: absolute;
-  padding: 0;
-  border-radius: 50%;
-  background: #111b18aa;
-  color: #fff;
+  padding: 10px;
+  border-radius: 0;
+  background: #142123e6;
+  color: #d9b56e;
 }
 #panel .component-preview .hotspot {
   border-radius: 50%;
@@ -2257,4 +2308,308 @@ body[data-view="graph"] .inspector {
 .check-field {
   border-color: #eaa14b !important;
   box-shadow: 0 0 0 3px #eaa14b24;
+}
+/* Editing workspace: TaleSpark colours, familiar media / preview / properties / timeline. */
+.timeline-dock,
+.layout > .panel-resize {
+  display: none;
+}
+body[data-view="scene"] .layout {
+  position: relative;
+  grid-template-columns: 66px var(--library-size, 290px) minmax(280px, 1fr) var(
+      --inspector-size,
+      300px
+    );
+  grid-template-rows: minmax(260px, 1fr) var(--timeline-size, 310px);
+  overflow: hidden;
+}
+body[data-view="scene"] .rail {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+body[data-view="scene"] .library {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  padding: 12px;
+}
+body[data-view="scene"] .workspace {
+  grid-column: 3;
+  grid-row: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+body[data-view="scene"] .inspector {
+  grid-column: 4;
+  grid-row: 1;
+  min-height: 0;
+  padding: 12px 16px;
+}
+body[data-view="scene"] .workspace-head {
+  min-height: 46px;
+  height: 46px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  gap: 6px;
+}
+body[data-view="scene"] .workspace-head h1 {
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body[data-view="scene"] .story-work {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 8px;
+  overflow: hidden;
+}
+body[data-view="scene"] .canvas {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  margin: 0;
+  border-radius: 5px;
+}
+body[data-view="scene"] .canvas[data-device="portrait"],
+body[data-view="scene"] .canvas[data-device="landscape"] {
+  width: 100%;
+  height: auto;
+  max-width: none;
+}
+body[data-view="scene"] .transport {
+  flex-shrink: 0;
+  height: 34px;
+  margin: 0;
+}
+body[data-view="scene"] .transport #seek {
+  display: none;
+}
+body[data-view="scene"] .transport .duration-label::before {
+  content: " / ";
+}
+body[data-view="scene"] .transport button {
+  margin-left: auto;
+  order: 2;
+}
+body[data-view="scene"] .transport .duration-label {
+  margin-right: auto;
+}
+body[data-view="scene"] .timeline-dock {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2 / 5;
+  grid-row: 2;
+  min-height: 0;
+  position: relative;
+  border-top: 1px solid var(--line);
+  background: #f8f9fc;
+  padding: 0 12px 10px;
+}
+body[data-view="scene"] .timeline-head {
+  flex-shrink: 0;
+  height: 42px;
+  margin: 0;
+}
+body[data-view="scene"] .timeline-head > span {
+  display: none;
+}
+body[data-view="scene"] .clip-tools {
+  margin-left: 0;
+}
+body[data-view="scene"] .timeline-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  border-radius: 4px;
+  overflow: auto;
+}
+body[data-view="scene"] .track {
+  min-height: 46px;
+}
+body[data-view="scene"] .track-label {
+  padding-top: 5px;
+}
+body[data-view="scene"] .track-controls {
+  opacity: 0.65;
+}
+body[data-view="scene"] .library .media-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+body[data-view="scene"] .library .media-thumb {
+  height: 76px;
+}
+body[data-view="scene"] .library .media-card {
+  min-width: 0;
+  margin: 0;
+}
+body[data-view="scene"] .library .asset-tabs {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+body[data-view="scene"] .library .asset-controls {
+  gap: 6px;
+}
+body[data-view="scene"] .panel-resize {
+  display: block;
+  position: absolute;
+  z-index: 20;
+}
+body[data-view="scene"] .timeline-resize {
+  top: -4px;
+  height: 8px;
+  left: 0;
+  right: 0;
+  cursor: ns-resize;
+}
+body[data-view="scene"] .layout > .library-resize {
+  left: calc(66px + var(--library-size, 290px) - 3px);
+  top: 0;
+  bottom: var(--timeline-size, 310px);
+  width: 6px;
+  cursor: ew-resize;
+}
+body[data-view="scene"] .layout > .inspector-resize {
+  right: calc(var(--inspector-size, 300px) - 3px);
+  top: 0;
+  bottom: var(--timeline-size, 310px);
+  width: 6px;
+  cursor: ew-resize;
+}
+.panel-resize:hover {
+  background: #7964ed55;
+}
+.resizing-panels {
+  user-select: none;
+}
+.property-tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  margin: 0 -4px 14px;
+  padding: 0 4px 8px;
+}
+#studio .property-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 7px 10px;
+  border-radius: 5px;
+}
+#studio .property-tabs button[aria-selected="true"] {
+  background: #eeeaff;
+  color: #735dea;
+}
+.property-section[hidden] {
+  display: none;
+}
+.property-section .field {
+  margin-bottom: 12px;
+}
+.property-section .muted {
+  line-height: 1.7;
+}
+.locate-interaction {
+  margin-bottom: 12px;
+}
+.canvas .editor-selected {
+  outline: 2px solid #8973f3;
+  outline-offset: 5px;
+}
+.clip.fixed-duration {
+  border-radius: 5px;
+  border-style: solid;
+  background: #fff2dc;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+.clip.fixed-duration::before,
+.clip.fixed-duration::after {
+  display: none;
+}
+.interaction-clip-icon {
+  padding-right: 5px;
+  font-size: 13px;
+}
+.clip-thumbnail {
+  height: 100%;
+  max-width: 42px;
+  object-fit: cover;
+  margin-right: 5px;
+  vertical-align: middle;
+  pointer-events: none;
+}
+.clip-waveform {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.clip-name {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+@media (max-width: 1100px) {
+  body[data-view="scene"] .layout {
+    grid-template-columns: 54px minmax(190px, 23%) minmax(200px, 1fr) minmax(
+        220px,
+        25%
+      );
+  }
+  body[data-view="scene"] .library .media-grid {
+    grid-template-columns: 1fr;
+  }
+  body[data-view="scene"] .layout > .panel-resize {
+    display: none;
+  }
+  body[data-view="scene"] .workspace-head [data-action="preview-current"] {
+    font-size: 10px;
+  }
+}
+
+.media-add {
+  position: absolute;
+  right: 8px;
+  top: 62px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0 !important;
+  background: #fff !important;
+  color: #735dea !important;
+}
+.template-card {
+  padding: 8px;
+}
+.template-card strong,
+.template-card small {
+  display: block;
+  margin: 6px 0;
+}
+.template-symbol {
+  display: grid;
+  place-items: center;
+  color: #7964ed;
+  font-size: 28px;
+  background: #f0edff;
+}
+
+.canvas .qte.psd-qte[data-edit-event] {
+  pointer-events: auto;
+  cursor: move;
 }

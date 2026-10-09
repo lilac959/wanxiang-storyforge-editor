@@ -272,13 +272,15 @@ export class Session {
     this.clear();
     this.root.innerHTML = '<div class="player-root"></div>';
     this.player = new PlayerView(this.root.firstElementChild, this.assets, {
-      onExit: () => this.home(),
+      onHome: () => this.home(),
+      onExit: () => (this.editor ? this.onExit() : this.home()),
+      canExit: this.editor,
       onChange: (event, runtime) => {
         if (!this.editor || !["blocked", "media-error"].includes(event.type))
           return;
         const message = this.player.message;
         message.hidden = false;
-        message.innerHTML = `<p>${esc(runtime?.scene?.name || "当前卡片")}：${esc(event.message)}</p><button data-locate-blocked>返回编辑并定位</button><button data-exit-blocked>退出试玩</button>`;
+        message.innerHTML = `<p>${esc(runtime?.scene?.name || "当前节点")}：${esc(event.message)}</p><button data-locate-blocked>返回编辑并定位</button><button data-exit-blocked>退出试玩</button>`;
         message.querySelector("[data-locate-blocked]").onclick = () =>
           this.onBlocked(event.sceneId || runtime?.scene?.id, event.eventId);
         message.querySelector("[data-exit-blocked]").onclick = () =>
@@ -318,7 +320,9 @@ export class Session {
       if (loading) {
         this.root.innerHTML = '<div class="player-root"></div>';
         this.player = new PlayerView(this.root.firstElementChild, this.assets, {
-          onExit: () => this.home(),
+          onHome: () => this.home(),
+          onExit: () => (this.editor ? this.onExit() : this.home()),
+          canExit: this.editor,
         });
         await this.player.start(p, loading.id);
       } else {
@@ -373,7 +377,7 @@ export class Session {
       const target = loading?.next;
       if (target?.kind === "scene") this.play(target.sceneId);
       else if (target?.kind === "unlinked")
-        throw Error("加载卡片尚未连接后续卡片");
+        throw Error("加载节点尚未连接后续节点");
       else this.play(splash?.id || p.entryId);
     } catch (error) {
       if (token !== this.token) return;

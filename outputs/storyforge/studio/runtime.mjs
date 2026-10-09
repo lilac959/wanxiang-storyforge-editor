@@ -201,8 +201,8 @@ export class Runtime {
         eventId,
         message:
           target.kind === "unlinked"
-            ? "这条剧情出口还没有连接下一张卡片"
-            : "目标卡片不存在",
+            ? "这条剧情出口还没有连接下一张节点"
+            : "目标节点不存在",
       });
     } else if (target.kind === "scene") this.enter(target.sceneId);
     else if (target.kind === "home") {

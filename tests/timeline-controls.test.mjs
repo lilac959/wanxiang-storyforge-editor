@@ -60,5 +60,5 @@ test("trial can start an unfinished story and reports only the missing route act
   assert.equal(seen.at(-1).sceneId, p.scenes[0].id);
   runtime.start(p.scenes[1].id);
   runtime.follow(p.scenes[1].next);
-  assert.equal(seen.at(-1).message, "目标卡片不存在");
+  assert.equal(seen.at(-1).message, "目标节点不存在");
 });

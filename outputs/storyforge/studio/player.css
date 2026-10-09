@@ -1070,3 +1070,190 @@ button:disabled {
 .player-root .settings-toggle {
   z-index: 10010;
 }
+
+/* Content coordinates stay identical in desktop, portrait and landscape hosts. */
+.player-root {
+  overflow: hidden;
+}
+.player-root .play-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center;
+}
+.play-stage .choices {
+  left: 6%;
+  right: 6%;
+  bottom: 6%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 26cqw));
+  gap: 1cqw 4cqw;
+}
+.play-stage .choices button {
+  width: 26cqw;
+  min-width: 0;
+  max-width: none;
+  min-height: 0;
+  font-size: 1.7cqw;
+  padding: 0.7em 0.7em 0.7em 9cqw;
+  background-size:
+    1.8cqw 0.2cqw,
+    0.2cqw 1.8cqw;
+  border-width: 0.1cqw;
+}
+.play-stage .mechanical-qte.psd-qte {
+  width: 11cqw;
+}
+.play-stage .psd-qte .qte-hint {
+  font-size: 1.2cqw;
+  margin-bottom: 0.8cqw;
+}
+.play-stage .psd-qte .qte-count:not(.sr-only) {
+  position: static;
+  display: block;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  margin-top: 0.8cqw;
+  font-size: 1.2cqw;
+  color: #e5d6b1;
+}
+.play-stage .hotspot {
+  width: 5cqw;
+  height: 5cqw;
+  font-size: 2.5cqw;
+  border-width: 0.15cqw;
+}
+.play-stage .scene-title h2 {
+  font-size: 4cqw;
+}
+.play-stage .scene-title p {
+  font-size: 1.5cqw;
+}
+.play-stage .psd-qte .meter {
+  transition: stroke-dashoffset 0.12s linear;
+}
+.play-stage .psd-qte.qte-input .meter {
+  transition: none;
+}
+.play-stage .psd-qte.qte-input .psd-glyph {
+  stroke: #ffdf8a;
+}
+
+/* Film sidebar: screen controls are separate from content scaling. */
+.player-root .settings-toggle {
+  border: 0;
+  border-radius: 0;
+  background: #142123e6;
+  color: #d9b56e;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+}
+.player-root .settings-toggle svg,
+.settings-shade svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.player-root .settings-shade {
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+  padding: 0;
+  background: #07101299;
+}
+.player-root .settings-shade .play-controls {
+  margin: 0;
+  width: min(320px, calc(100% - 40px));
+  max-height: 100%;
+  overflow-y: auto;
+  padding: max(72px, env(safe-area-inset-top)) 26px 26px;
+  background: #101c1ef5;
+  border: 0;
+  border-right: 1px solid #d9b56e66;
+  border-radius: 0;
+  color: #f5edda;
+  opacity: 1;
+  transform: none;
+}
+.player-root .settings-shade .play-controls header {
+  color: #d9b56e;
+  letter-spacing: 3px;
+  margin-bottom: 24px;
+}
+.player-root .settings-shade .play-controls button {
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 12px 0;
+  font-size: 14px;
+}
+.player-root .settings-shade .settings-options {
+  gap: 8px;
+}
+.player-root .settings-shade .settings-options button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #baa16a33;
+  min-height: 48px;
+}
+.player-root .settings-shade .settings-options button:hover {
+  color: #d9b56e;
+}
+.player-root .settings-shade .settings-options [data-player="pause"] {
+  color: #d9b56e;
+  border-left: 2px solid #d9b56e;
+  padding-left: 12px;
+  background: #d9b56e0c;
+}
+.sound-state {
+  margin-left: auto;
+  color: #d9b56e;
+  font-weight: 400;
+}
+.player-root .settings-shade .settings-confirm button {
+  padding: 10px 18px;
+  border: 1px solid #baa16a66;
+}
+.player-root .settings-shade .play-status {
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .player-root .settings-shade:not([hidden]) .play-controls {
+    animation: menu-sidebar-enter 0.2s ease-out;
+  }
+  @keyframes menu-sidebar-enter {
+    from {
+      opacity: 0;
+      transform: translateX(-24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
+
+.interaction[data-entry-motion="fade"] > * {
+  animation: interaction-fade 0.25s ease-out;
+}
+.interaction[data-entry-motion="none"] > *,
+.interaction[data-entry-motion="none"] .psd-qte-surface {
+  animation: none;
+}
+@keyframes interaction-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .interaction[data-entry-motion="fade"] > * {
+    animation: none;
+  }
+}

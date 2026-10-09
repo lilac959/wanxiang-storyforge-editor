@@ -35,7 +35,7 @@ export function duration(scene) {
         : scene.durationMs,
   );
 }
-export function newScene(name = "新的剧情段落") {
+export function newScene(name = "新的剧情节点") {
   return {
     id: uid("scene"),
     name,
@@ -232,12 +232,12 @@ export function changeRole(project, id, role) {
     !scene ||
     !["story", "loading", "splash", "ending", "death"].includes(role)
   )
-    throw Error("卡片用途无效");
+    throw Error("节点用途无效");
   if (openingRole({ role }) && project.entryId === id) {
     const replacement = project.scenes.find(
       (s) => s.id !== id && !openingRole(s),
     );
-    if (!replacement) throw Error("请先新建一张剧情卡片，作为起始剧情");
+    if (!replacement) throw Error("请先新建一张剧情节点，作为起始节点");
     project.entryId = replacement.id;
   }
   if (openingRole(scene)) {
@@ -282,12 +282,12 @@ export function changeRole(project, id, role) {
 export function setCardNext(project, id, target) {
   const scene = project.scenes.find((s) => s.id === id),
     destination = project.scenes.find((s) => s.id === target.sceneId);
-  if (!scene) throw Error("卡片不存在");
-  if (destination?.role === "loading") throw Error("加载卡片只用于作品启动");
+  if (!scene) throw Error("节点不存在");
+  if (destination?.role === "loading") throw Error("加载节点只用于作品启动");
   if (openingRole(scene) && !["scene", "unlinked"].includes(target.kind))
-    throw Error("请选择后续卡片");
+    throw Error("请选择后续节点");
   if (scene.role === "splash" && openingRole(destination))
-    throw Error("开屏请连接剧情卡片");
+    throw Error("开屏请连接剧情节点");
   scene.next = clone(target);
   if (scene.role === "splash" && target.kind === "scene")
     project.entryId = target.sceneId;
@@ -606,18 +606,18 @@ export function validate(p, { publish = false } = {}) {
       !Array.isArray(s.effects) ||
       !integer(s.durationMs)
     ) {
-      error("剧情段落结构无效", s?.id, "structure");
+      error("剧情节点结构无效", s?.id, "structure");
       return issues;
     }
-    unique(s.id, "剧情段落", s.id);
+    unique(s.id, "剧情节点", s.id);
     ids.add(s.id);
   }
-  if (!ids.has(p.entryId)) error("请选择作品的开始段落");
+  if (!ids.has(p.entryId)) error("请选择作品的开始节点");
   if (openingRole(p.scenes.find((s) => s.id === p.entryId)))
-    error("起始剧情不能是加载或开屏卡片");
+    error("起始节点不能是加载或开屏节点");
   for (const role of ["loading", "splash"])
     if (p.scenes.filter((s) => s.role === role).length > 1)
-      error("加载和开屏各最多一张卡片");
+      error("加载和开屏各最多一张节点");
   let activeScenes;
   try {
     activeScenes = reachable(p);
@@ -671,7 +671,7 @@ export function validate(p, { publish = false } = {}) {
     if (t.kind === "unlinked")
       (requiredAtRelease(s) ? error : warn)("存在未连接的剧情出口", s.id);
     if (t.kind === "scene" && !ids.has(t.sceneId))
-      error("连接的剧情段落不存在", s.id);
+      error("连接的剧情节点不存在", s.id);
     if (t.kind === "seek" && (!integer(t.timeMs) || t.timeMs > duration(s)))
       error("视频内跳转位置超出范围", s.id);
   };
@@ -742,7 +742,7 @@ export function validate(p, { publish = false } = {}) {
       !str(c.subtitle) ||
       (c.loop !== undefined && typeof c.loop !== "boolean")
     ) {
-      error("开场卡片设置无效", scene.id, "structure");
+      error("开场节点设置无效", scene.id, "structure");
       continue;
     }
     if (
@@ -752,7 +752,7 @@ export function validate(p, { publish = false } = {}) {
         !integer(c.minimumMs) ||
         c.minimumMs > 30000)
     )
-      error("加载卡片设置无效", scene.id);
+      error("加载节点设置无效", scene.id);
     if (c.startText !== undefined && !str(c.startText))
       error("开始按钮文字无效", scene.id);
     if (c.effect !== undefined && !["fade", "zoom", "none"].includes(c.effect))
@@ -794,7 +794,7 @@ export function validate(p, { publish = false } = {}) {
       destination?.role === "loading" ||
       (scene.role === "splash" && openingRole(destination))
     )
-      error("开场卡片连接无效", scene.id);
+      error("开场节点连接无效", scene.id);
   }
   if (!p.unifiedCards) {
     if (p.loading.image) ref(p.loading.image, null, "image");
@@ -842,7 +842,7 @@ export function validate(p, { publish = false } = {}) {
         !clips.length &&
         !s.overlays?.length
       )
-        error("场景缺少画面素材", s.id);
+        error("节点缺少画面素材", s.id);
     }
     if (s.video) {
       context = {
@@ -878,9 +878,9 @@ export function validate(p, { publish = false } = {}) {
     const d = duration(s);
     if (!integer(d) || d < 1 || d > 7200000) error("剧情时长无效", s.id);
     if (s.source === "images" && !s.images.length && !s.overlays?.length)
-      error("图片段落尚未添加图片", s.id);
+      error("图片节点尚未添加图片", s.id);
     if (requiredAtRelease(s) && s.pending)
-      error("请完成待配置段落，或取消其待配置标记", s.id);
+      error("请完成待配置节点，或取消其待配置标记", s.id);
     if (
       requiredAtRelease(s) &&
       s.role === "story" &&
@@ -888,7 +888,7 @@ export function validate(p, { publish = false } = {}) {
       !s.video &&
       !s.overlays?.length
     )
-      error("剧情段落缺少视频或图片", s.id);
+      error("剧情节点缺少视频或图片", s.id);
     context = {
       routePath: "next",
       label: openingRole(s)
@@ -907,7 +907,7 @@ export function validate(p, { publish = false } = {}) {
         x.endMs <= x.startMs ||
         x.endMs > d
       )
-        error(`${label}时间超出段落范围`, s.id);
+        error(`${label}时间超出节点范围`, s.id);
     };
     for (const x of s.overlays || []) {
       context = {

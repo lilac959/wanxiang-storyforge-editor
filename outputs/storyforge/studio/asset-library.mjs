@@ -7,6 +7,8 @@ const labels = {
   image: "图片",
   audio: "音频",
   ui: "互动 UI",
+  text: "字幕",
+  effect: "效果",
 };
 export function mediaUses(project, id) {
   const found = [];
@@ -104,6 +106,22 @@ export class AssetLibrary {
       v.removeAttribute("src");
       v.load();
     });
+    if (["text", "effect"].includes(this.category)) {
+      const templates =
+        this.category === "text"
+          ? [["add-subtitle", "普通字幕", "Aa", "可修改文字、位置和样式"]]
+          : [
+              ["add-speed", "播放速度", "0.5×", "设置区间内的播放倍速"],
+              ["add-bars", "电影黑边", "▰", "添加上下黑边"],
+            ];
+      grid.innerHTML = templates
+        .map(
+          ([action, name, symbol, description]) =>
+            `<article class="media-card template-card"><div class="media-thumb template-symbol">${symbol}</div><strong>${name}</strong><small>${description}</small><button class="full" data-action="${action}">＋ 添加到时间轴</button></article>`,
+        )
+        .join("");
+      return;
+    }
     let list = [
       ...Object.values(this.project.assets).reverse(),
       ...UI_COMPONENTS.map((c) => ({
@@ -123,7 +141,7 @@ export class AssetLibrary {
       list
         .map(
           (a) =>
-            `<article class="media-card"><button class="media-open" data-media-id="${esc(a.id)}" data-media-kind="${a.kind}" aria-label="预览 ${esc(a.name)}"><div class="media-thumb ${a.kind}">${a.kind === "ui" ? componentThumbnail(a) : a.kind === "audio" ? '<span class="audio-symbol">♫</span>' : "<span>加载缩略图…</span>"}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${labels[a.kind]}${a.durationMs ? ` · ${(a.durationMs / 1000).toFixed(1)} 秒` : ""}${a.kind === "ui" ? " · 第 1 版" : ""}</small></button><details class="media-menu"><summary aria-label="${esc(a.name)}操作">···</summary><div>${a.kind === "ui" ? `<button data-action="preview-ui" data-id="${esc(a.id)}">预览并试用</button><button data-action="use-ui" data-id="${esc(a.id)}">添加到当前场景</button>` : `<button data-action="rename-asset" data-id="${esc(a.id)}">重命名</button><button data-action="asset-uses" data-id="${esc(a.id)}">查看使用位置</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="remove-asset" data-id="${esc(a.id)}">删除</button>`}</div></details></article>`,
+            `<article class="media-card"><button class="media-open" data-media-id="${esc(a.id)}" data-media-kind="${a.kind}" aria-label="预览 ${esc(a.name)}"><div class="media-thumb ${a.kind}">${a.kind === "ui" ? componentThumbnail(a) : a.kind === "audio" ? '<span class="audio-symbol">♫</span>' : "<span>加载缩略图…</span>"}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${labels[a.kind]}${a.durationMs ? ` · ${(a.durationMs / 1000).toFixed(1)} 秒` : ""}${a.kind === "ui" ? " · 第 1 版" : ""}</small></button><button class="media-add" data-action="add-library-item" data-id="${esc(a.id)}" data-kind="${a.kind}" aria-label="添加 ${esc(a.name)}到时间轴" title="添加到播放指针位置">＋</button><details class="media-menu"><summary aria-label="${esc(a.name)}操作">···</summary><div>${a.kind === "ui" ? `<button data-action="preview-ui" data-id="${esc(a.id)}">预览并试用</button><button data-action="use-ui" data-id="${esc(a.id)}">添加到当前节点</button>` : `<button data-action="rename-asset" data-id="${esc(a.id)}">重命名</button><button data-action="asset-uses" data-id="${esc(a.id)}">查看使用位置</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="remove-asset" data-id="${esc(a.id)}">删除</button>`}</div></details></article>`,
         )
         .join("") || '<p class="media-empty">没有找到素材</p>';
     grid.querySelectorAll(".media-open").forEach((b) => {
