@@ -19,16 +19,21 @@ export const endTarget = () => ({ kind: "end" });
 export const sceneTarget = (id) =>
   id ? { kind: "scene", sceneId: id } : endTarget();
 export function duration(scene) {
+  const overlayEnd = Math.max(0, ...(scene.overlays || []).map((c) => c.endMs));
   if (scene.source === "sequence")
     return Math.max(
       scene.clips?.length ? 0 : scene.durationMs,
       ...(scene.clips || []).map((c) => c.startMs + clipLength(c)),
+      overlayEnd,
     );
-  return scene.source === "images"
-    ? scene.images.reduce((n, f) => n + f.durationMs, 0)
-    : scene.video
-      ? scene.video.outMs - scene.video.inMs
-      : scene.durationMs;
+  return Math.max(
+    overlayEnd,
+    scene.source === "images"
+      ? scene.images.reduce((n, f) => n + f.durationMs, 0)
+      : scene.video
+        ? scene.video.outMs - scene.video.inMs
+        : scene.durationMs,
+  );
 }
 export function newScene(name = "新的剧情段落") {
   return {
@@ -831,7 +836,12 @@ export function validate(p, { publish = false } = {}) {
         )
           error("片段出点超过素材时长", s.id);
       }
-      if (requiredAtRelease(s) && s.role === "story" && !clips.length)
+      if (
+        requiredAtRelease(s) &&
+        s.role === "story" &&
+        !clips.length &&
+        !s.overlays?.length
+      )
         error("场景缺少画面素材", s.id);
     }
     if (s.video) {
@@ -867,7 +877,7 @@ export function validate(p, { publish = false } = {}) {
     context = {};
     const d = duration(s);
     if (!integer(d) || d < 1 || d > 7200000) error("剧情时长无效", s.id);
-    if (s.source === "images" && !s.images.length)
+    if (s.source === "images" && !s.images.length && !s.overlays?.length)
       error("图片段落尚未添加图片", s.id);
     if (requiredAtRelease(s) && s.pending)
       error("请完成待配置段落，或取消其待配置标记", s.id);
@@ -875,7 +885,8 @@ export function validate(p, { publish = false } = {}) {
       requiredAtRelease(s) &&
       s.role === "story" &&
       s.source === "video" &&
-      !s.video
+      !s.video &&
+      !s.overlays?.length
     )
       error("剧情段落缺少视频或图片", s.id);
     context = {
@@ -906,7 +917,16 @@ export function validate(p, { publish = false } = {}) {
         timeMs: x?.startMs,
       };
       interval(x, "图片叠加");
-      ref(x.assetId, s.id, "image");
+      const overlayAsset = p.assets[x.assetId];
+      ref(x.assetId, s.id, overlayAsset?.kind === "video" ? "video" : "image");
+      if (
+        overlayAsset?.kind === "video" &&
+        (!integer(x.inMs ?? 0) ||
+          (x.inMs ?? 0) + x.endMs - x.startMs > overlayAsset.durationMs)
+      )
+        error("叠加视频截取超过素材时长", s.id);
+      if (overlayAsset?.kind === "video" && !finite(x.volume ?? 1, 0, 1))
+        error("叠加视频音量无效", s.id);
       if (
         !finite(x.x, 0, 100) ||
         !finite(x.y, 0, 100) ||

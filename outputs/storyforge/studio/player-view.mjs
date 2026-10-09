@@ -1,3 +1,4 @@
+import { visualLayer, itemTrackId } from "./tracks.mjs";
 import { GESTURE_PATHS } from "./ui-components.mjs";
 import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
@@ -277,6 +278,8 @@ export class PlayerView {
     this.eventId = null;
   }
   cleanupMedia() {
+    for (const v of this.root.querySelectorAll(".picture-overlays video"))
+      v.pause();
     this.video?.pause();
     if (this.video) {
       this.video.removeAttribute("src");
@@ -595,6 +598,8 @@ export class PlayerView {
   }
   pauseMedia() {
     this.video?.pause();
+    for (const video of this.root.querySelectorAll(".picture-overlays video"))
+      video.pause();
     for (const a of this.audio.values()) a.pause();
   }
   async syncMedia() {
@@ -646,7 +651,12 @@ export class PlayerView {
       const a = this.audio.get(clip.id);
       if (!a) continue;
       const active =
-        !r.mediaPaused && r.timeMs >= clip.startMs && r.timeMs < clip.endMs;
+        !r.scene.previewHiddenTracks?.includes(
+          itemTrackId(r.scene, clip, "audio"),
+        ) &&
+        !r.mediaPaused &&
+        r.timeMs >= clip.startMs &&
+        r.timeMs < clip.endMs;
       if (!active) {
         a.pause();
         continue;
@@ -766,13 +776,20 @@ export class PlayerView {
       title.dataset.text = text;
       title.innerHTML = `<small>${scene.role === "death" ? "◇" : scene.role === "ending" ? "THE END" : ""}</small><h2>${esc(scene.name)}</h2><p>${esc(scene.subtitle)}</p>`;
     }
-    const captions = scene.subtitles.filter(
-      (c) => time >= c.startMs && time < c.endMs,
-    );
+    const captions = scene.subtitles
+      .filter(
+        (c) =>
+          !scene.previewHiddenTracks?.includes(
+            itemTrackId(scene, c, "subtitle"),
+          ) &&
+          (!this.editing ||
+            !this.previewHiddenTracks?.has(itemTrackId(scene, c, "subtitle"))),
+      )
+      .filter((c) => time >= c.startMs && time < c.endMs);
     const html = captions
       .map(
         (c) =>
-          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
+          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="z-index:${visualLayer(scene, c)};left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
       )
       .join("");
     const host = this.root.querySelector(".captions");
@@ -805,29 +822,72 @@ export class PlayerView {
       this.stage.append(host);
     }
     const list = (scene.overlays || []).filter(
-        (x) => time >= x.startMs && time < x.endMs,
-      ),
-      key = this.token + JSON.stringify(list);
-    if (host.dataset.key === key) return;
-    host.dataset.key = key;
-    host.innerHTML = "";
-    const token = this.token;
-    for (const x of list) {
-      const img = new Image();
-      if (this.editing) {
-        img.dataset.editItem = x.id;
-        img.dataset.editKind = "overlay";
+      (x) =>
+        time >= x.startMs &&
+        time < x.endMs &&
+        !scene.previewHiddenTracks?.includes(
+          itemTrackId(scene, x, "overlay"),
+        ) &&
+        (!this.editing ||
+          !this.previewHiddenTracks?.has(itemTrackId(scene, x, "overlay"))),
+    );
+    const key =
+      this.token +
+      JSON.stringify([
+        list,
+        scene.timelineTracks,
+        list.map((x) => this.project.assets[x.assetId]),
+      ]);
+    if (host.dataset.key !== key) {
+      host.dataset.key = key;
+      for (const el of host.querySelectorAll("video")) el.pause();
+      host.replaceChildren();
+      const token = this.token;
+      for (const x of list) {
+        const asset = this.project.assets[x.assetId],
+          video = asset?.kind === "video";
+        const el = document.createElement(video ? "video" : "img");
+        el.dataset.overlayId = x.id;
+        if (this.editing) {
+          el.dataset.editItem = x.id;
+          el.dataset.editKind = "overlay";
+        }
+        if (video) {
+          el.playsInline = true;
+          el.preload = "auto";
+          el.muted = this.editing || this.muted;
+          el.volume = clamp(x.volume ?? 1, 0, 1);
+        } else el.alt = asset?.name || "";
+        el.style.cssText = `left:${x.x}%;top:${x.y}%;width:${x.width}%;z-index:${visualLayer(scene, x)}`;
+        host.append(el);
+        el.onerror = () => this.showError("叠加素材无法读取");
+        this.assets
+          .url(asset)
+          .then((url) => {
+            if (token === this.token && el.isConnected) {
+              el.src = url;
+              if (video)
+                el.onloadedmetadata = () => {
+                  if (el.isConnected)
+                    el.currentTime = Number(el.dataset.wanted || 0);
+                };
+            }
+          })
+          .catch(() => this.showError("叠加素材无法读取"));
       }
-      img.alt = this.project.assets[x.assetId]?.name || "";
-      img.style.cssText =
-        "left:" + x.x + "%;top:" + x.y + "%;width:" + x.width + "%";
-      host.append(img);
-      this.assets
-        .url(this.project.assets[x.assetId])
-        .then((url) => {
-          if (token === this.token && img.isConnected) img.src = url;
-        })
-        .catch(() => this.showError("叠加图片无法读取"));
+    }
+    for (const el of host.querySelectorAll("video")) {
+      const x = list.find((x) => x.id === el.dataset.overlayId);
+      const wanted = (time - x.startMs + (x.inMs || 0)) / 1000;
+      el.dataset.wanted = wanted;
+      el.muted = this.editing || this.muted;
+      el.volume = clamp(x.volume ?? 1, 0, 1);
+      if (el.readyState && Math.abs(el.currentTime - wanted) > 0.12)
+        el.currentTime = wanted;
+      if (!this.editing && this.runtime?.playing && !this.runtime.mediaPaused) {
+        el.playbackRate = this.runtime.rate;
+        if (el.paused) el.play().catch(() => {});
+      } else el.pause();
     }
   }
   paintEvent(event) {

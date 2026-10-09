@@ -60,6 +60,33 @@ export function linked(s, cid) {
     (s[k] || []).filter((x) => x.linkedClipId === cid),
   );
 }
+export function liftVisual(scene, cid, at) {
+  const clips = ensureSequence(scene),
+    c = clips.find((x) => x.id === cid);
+  if (!c) throw Error("请选择画面片段");
+  const startMs = Math.max(0, Math.round(at)),
+    delta = startMs - c.startMs;
+  const overlay = {
+    id: c.id,
+    assetId: c.assetId,
+    inMs: c.inMs,
+    startMs,
+    endMs: startMs + clipLength(c),
+    x: 50,
+    y: 50,
+    width: 35,
+    volume: 1,
+  };
+  for (const child of linked(scene, cid)) {
+    child.startMs += delta;
+    child.endMs += delta;
+    delete child.linkedClipId;
+  }
+  scene.clips = clips.filter((x) => x !== c);
+  scene.overlays ||= [];
+  scene.overlays.push(overlay);
+  return overlay;
+}
 export function moveClip(s, cid, start) {
   const clips = ensureSequence(s),
     c = clips.find((x) => x.id === cid);

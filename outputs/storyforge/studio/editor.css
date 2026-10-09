@@ -705,6 +705,71 @@ details > summary:after {
   left: 0;
   z-index: 4;
 }
+.track-label {
+  padding: 6px 4px;
+  width: 70px;
+}
+.track-label > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-controls {
+  display: flex;
+  opacity: 0;
+}
+.track[data-track-id^="new-"] .track-controls { display: none; }
+.track:hover .track-controls,
+.track:focus-within .track-controls,
+.track-locked .track-controls,
+.preview-hidden .track-controls {
+  opacity: 1;
+}
+.track-controls button {
+  font-size: 10px;
+  padding: 0;
+  min-width: 15px;
+  height: 16px;
+  border: 0;
+  background: transparent;
+}
+.track-controls button[aria-pressed="true"] {
+  color: #745bf0;
+  background: #eee9ff;
+}
+.preview-hidden .clip {
+  opacity: 0.4;
+}
+.track-locked .clip {
+  cursor: not-allowed;
+}
+.interaction-conflict {
+  position: absolute;
+  inset-block: 0;
+  background: #e8494920;
+  color: #b52b2b;
+  border: 0;
+  border-top: 2px solid #db5757;
+  text-align: right;
+  padding: 0;
+  z-index: 2;
+}
+.clip {
+  z-index: 3;
+}
+.track .interaction-conflict {
+  height: 12px;
+  min-width: 18px;
+  font-size: 10px;
+  line-height: 10px;
+}
+.track:has(.interaction-conflict) {
+  min-height: 50px;
+}
+.track:has(.interaction-conflict) .clip {
+  top: 15px;
+}
 .lane {
   position: relative;
   flex: 1;
@@ -1846,6 +1911,13 @@ body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
 .drop-lane {
   background-color: #f1edff;
   outline: 1px dashed #ada0ed;
+}
+.timeline-drop {
+  top: 5px;
+  bottom: 5px;
+  border: 1px dashed #7764ed;
+  border-radius: 4px;
+  background: #7764ed33;
 }
 .component-preview[data-background="light"] .scenery {
   background: #dddfe7;

@@ -617,6 +617,32 @@ button:disabled {
   height: auto;
   object-fit: contain;
 }
+/* Visual children share the stage's stacking order across image/video/text tracks. */
+.play-stage .picture-overlays,
+.play-stage .captions {
+  display: contents;
+}
+.picture-overlays video {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+}
+.play-stage .interaction {
+  z-index: 10002;
+}
+.player-root .settings-toggle,
+.player-root .settings-shade {
+  z-index: 10010;
+}
+.play-stage .play-message,
+.play-stage .feedback {
+  z-index: 10005;
+}
+.play-stage [data-edit-item] {
+  pointer-events: auto;
+}
 /* Immersive playback: controls are only visible in the settings menu. */
 .player-root .settings-toggle {
   position: absolute;
@@ -1039,4 +1065,8 @@ button:disabled {
   stroke-dashoffset: calc(100 - var(--qte-progress));
   transform: rotate(-90deg);
   transform-origin: center;
+}
+
+.player-root .settings-toggle {
+  z-index: 10010;
 }
