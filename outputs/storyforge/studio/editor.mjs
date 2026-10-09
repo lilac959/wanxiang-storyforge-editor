@@ -54,7 +54,7 @@ import {
   gestures,
   endTarget,
 } from "./model.mjs";
-import { AssetStore, resolveOpeningMedia } from "./assets.mjs";
+import { AssetStore, resolveOpeningMedia, inspect } from "./assets.mjs";
 import {
   Storage,
   esc,
@@ -64,6 +64,7 @@ import {
   response,
 } from "./storage.mjs";
 import { History } from "./history.mjs";
+import { repairTechnicalData, describeIssues } from "./check-project.mjs";
 import { PlayerView } from "./player-view.mjs";
 import { Session } from "./session.mjs";
 import { demoProject } from "./demo.mjs";
@@ -303,7 +304,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">搜索</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起卡片目录">卡片目录</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
@@ -380,7 +381,7 @@ function render() {
   }
   if (!p().scenes.some((x) => x.id === selected)) selected = p().entryId;
   if (!selectObject()) selection = { kind: "scene" };
-  time = clamp(time, 0, duration(s()));
+  time = clamp(Number.isFinite(time) ? time : 0, 0, editableDuration());
   $(".project-name").textContent = p().name;
   $(".project-name").title = p().name;
   document.title = `${p().name} · 故事引擎 TaleSpark`;
@@ -454,8 +455,11 @@ function paintStill() {
   if (page !== "story" || graph) return;
   $(".canvas-label span").textContent = s().name;
   $(".time-label").textContent = (time / 1000).toFixed(1) + "s";
-  $(".duration-label").textContent = (duration(s()) / 1000).toFixed(1) + "s";
-  $("#seek").max = duration(s());
+  const sceneDuration = duration(s());
+  $(".duration-label").textContent = Number.isFinite(sceneDuration)
+    ? (sceneDuration / 1000).toFixed(1) + "s"
+    : "时长待修复";
+  $("#seek").max = editableDuration();
   $("#seek").value = time;
   still
     .renderStill(
@@ -613,7 +617,7 @@ function renderTimeline() {
             )
             .map(
               (x) =>
-                `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${x.id}" data-kind="${x.kind}" class="clip ${x.kind} ${selection.id === x.id ? "selected" : ""}" style="left:${(x.start / d) * 100}%;width:${Math.max(0.6, ((x.end - x.start) / d) * 100)}%" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒"><i class="handle left" data-edge="left"></i>${esc(x.label)}<i class="handle right" data-edge="right"></i></div>`,
+                `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${x.id}" data-kind="${x.kind}" class="clip ${x.kind} ${selection.id === x.id ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒"><i class="handle left" data-edge="left"></i>${esc(x.label)}<i class="handle right" data-edge="right"></i></div>`,
             )
             .join("")}</div></div>`,
       )
@@ -627,6 +631,20 @@ function updatePlayhead() {
   $(".time-label").textContent = sec(time).toFixed(1) + "s";
 }
 function renderInspector() {
+  const panel = $(".inspector"),
+    scroll = panel.scrollTop;
+  renderInspectorContent();
+  if (page === "story" && graph) {
+    const close = document.createElement("button");
+    close.className = "inspector-close";
+    close.dataset.action = "close-inspector";
+    close.setAttribute("aria-label", "关闭属性面板");
+    close.textContent = "×";
+    panel.prepend(close);
+  }
+  panel.scrollTop = scroll;
+}
+function renderInspectorContent() {
   if (page === "story" && graph && board?.activeEdge) {
     renderEdgeInspector(board.activeEdge);
     return;
@@ -853,10 +871,7 @@ function renderInspector() {
   );
   const critical = issues.filter((x) => x.level === "error");
   if (critical.length)
-    html += `<div class="issues"><strong>当前检查</strong>${critical
-      .slice(0, 8)
-      .map((x) => `<p>${x.level === "error" ? "●" : "△"} ${esc(x.message)}</p>`)
-      .join("")}</div>`;
+    html += `<div class="issues"><strong>这张卡片有 ${critical.length} 项需要处理</strong><button data-action="check-project">查看问题与处理方式</button></div>`;
   if (
     page === "story" &&
     ["event", "subtitle", "audio", "effect", "overlay"].includes(selection.kind)
@@ -911,8 +926,6 @@ function renderInspector() {
             "</button>",
         )
         .join("");
-  if (page === "story" && graph && critical.length)
-    html += `<div class="issues">${critical.map((x) => `<p>${esc(x.message)}</p>`).join("")}</div>`;
   if (page === "story" && selection.kind === "scene" && openingRole(scene))
     html += openingSettings(scene);
   $(".inspector").innerHTML = html;
@@ -1242,7 +1255,7 @@ async function boot() {
 async function preview({ full = false, here = false } = {}) {
   const errors = validate(p()).filter((x) => x.level === "error");
   if (errors.length) {
-    showIssues(false);
+    await showIssues(false);
     return;
   }
   previewSession?.dispose();
@@ -1351,11 +1364,112 @@ async function previewAsset(id, kind) {
   };
   $(".media-preview").replaceChildren(media);
 }
-function showIssues(publishing) {
-  const issues = validate(p(), { publish: publishing });
+let checkRequest = 0,
+  checkState = null;
+async function showIssues(publishing, { repair = true } = {}) {
+  if (busy) throw Error("请等待素材导入完成");
+  const request = ++checkRequest,
+    before = JSON.stringify(p()),
+    projectId = p().id;
+  panel(`<h2>正在检查作品</h2><p>正在读取素材信息，自动处理能确定的问题…</p>`);
+  const result = repair
+    ? await repairTechnicalData(p(), async (a) =>
+        inspect(await assets.url(a), a.kind),
+      )
+    : { project: p(), repairs: [], failures: [] };
+  if (request !== checkRequest || !$("#panel").open) return;
+  if (before !== JSON.stringify(p())) {
+    panel(
+      '<h2>作品已发生变化</h2><p>本次检查结果未应用，请重新检查最新内容。</p><button data-action="check-project">重新检查</button>',
+    );
+    return;
+  }
+  if (!checkState || checkState.projectId !== projectId)
+    checkState = { projectId, repairs: [] };
+  if (result.repairs.length) {
+    storage.backup(p(), "作品检查自动修复前");
+    mutate("作品检查自动修复", (project) =>
+      Object.assign(project, result.project),
+    );
+    checkState.repairs = result.repairs;
+    checkState.transaction = history.past.at(-1);
+  }
+  checkState.publishing = publishing;
+  checkState.issues = describeIssues(p(), {
+    publish: true,
+    failures: result.failures,
+  });
+  renderCheckReport();
+}
+function renderCheckReport() {
+  const { issues, repairs, publishing } = checkState;
+  const errors = issues.filter((x) => x.level === "error"),
+    warnings = issues.filter((x) => x.level !== "error");
+  const groups = new Map();
+  for (const x of [...errors, ...warnings]) {
+    const key = x.sceneId || "@project";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(x);
+  }
+  const canUndo =
+    checkState.transaction && history.past.at(-1) === checkState.transaction;
   panel(
-    `<h2>${publishing ? "发布前检查" : "作品检查"}</h2>${issues.length ? issues.map((x) => `<p>${x.level === "error" ? "● 必须修复" : "△ 提醒"}：${esc(x.message)} ${x.sceneId ? `<button data-action="locate" data-id="${x.sceneId}">定位</button>` : ""}</p>`).join("") : "<p>配置检查通过。发布时还会验证素材和独立运行端读取。</p>"}${publishing && !issues.some((x) => x.level === "error") ? '<button class="primary" data-action="confirm-publish">检查素材并发布此版本</button>' : ""}`,
+    `<section class="check-report"><h2>${publishing ? "发布前检查" : "作品检查"}</h2><div class="check-summary"><strong>${errors.length ? `${errors.length} 项需要处理` : "没有阻止发布的问题"}</strong><span>${warnings.length ? `另有 ${warnings.length} 项提醒` : ""}</span><button data-action="check-again">重新检查</button></div>${repairs.length ? `<details class="check-repairs"><summary>已自动修复 ${repairs.length} 项 · 查看记录</summary>${repairs.map((r) => `<p>${esc(r.message)}</p>`).join("")}<button data-action="undo-check-repairs" ${canUndo ? "" : "disabled"}>撤销本次自动修复</button>${canUndo ? "" : "<small>修复后已有其他编辑，可通过顶部撤销逐步恢复，或在作品中打开修复前副本。</small>"}</details>` : ""}${!issues.length ? '<p class="check-success">当前配置检查通过。发布时会继续确认素材和运行端能否读取。</p>' : [...groups].map(([id, list]) => `<details class="check-group" open><summary>${esc(p().scenes.find((s) => s.id === id)?.name || "作品与素材")} <small>${list.length} 项</small></summary>${list.map((x) => `<article class="check-item ${x.level}"><span class="check-level">${x.level === "error" ? "需要处理 · 发布前" : "提醒 · 可继续编辑和发布"}</span><h3>${esc(x.title)}</h3><p>${esc(x.detail)}</p><button data-action="locate-issue" data-index="${issues.indexOf(x)}">${esc(x.action)}</button></article>`).join("")}</details>`).join("")}${publishing && !errors.length ? '<button class="primary" data-action="confirm-publish">检查素材并发布此版本</button>' : ""}</section>`,
   );
+}
+async function locateIssue(index) {
+  const issue = checkState?.issues[index];
+  if (!issue) return;
+  closePanel();
+  if (issue.view === "asset" && p().assets[issue.assetId]) {
+    await previewAsset(issue.assetId);
+    return;
+  }
+  if (issue.view === "variables") {
+    page = "variables";
+    render();
+    return;
+  }
+  if (!issue.sceneId) {
+    page = /起始|开始|开屏|加载/.test(issue.message || "") ? "story" : "theme";
+    graph = page === "story";
+    render();
+    return;
+  }
+  selected = issue.sceneId;
+  page = "story";
+  graph = issue.view === "graph";
+  inspectorOpen = true;
+  selection =
+    !graph && issue.itemId
+      ? { kind: issue.itemKind, id: issue.itemId }
+      : { kind: "scene" };
+  time = clamp(issue.timeMs || 0, 0, editableDuration());
+  render();
+  if (graph) {
+    board.selected = new Set([selected]);
+    board.highlight();
+    board.locate(selected);
+    const outlet = [...$(".inspector").querySelectorAll("[data-path]")].find(
+      (el) => el.dataset.path === issue.routePath,
+    );
+    outlet?.classList.add("check-field");
+    outlet?.scrollIntoView({ block: "nearest" });
+  } else {
+    const clip = [
+      ...$(".timeline-scroll").querySelectorAll("[data-clip]"),
+    ].find((el) => el.dataset.clip === issue.itemId);
+    clip?.scrollIntoView({ block: "nearest", inline: "center" });
+    clip?.classList.add("check-focus");
+    const field =
+      issue.field &&
+      [...$(".inspector").querySelectorAll("[data-field]")].find(
+        (el) => el.dataset.field === issue.field,
+      );
+    field?.classList.add("check-field");
+    field?.focus({ preventScroll: true });
+    field?.scrollIntoView({ block: "nearest" });
+  }
 }
 function download(blob, name) {
   const url = URL.createObjectURL(blob),
@@ -2028,7 +2142,7 @@ async function handleAction(action, button) {
       closePanel();
       await sync();
       if (resumePublish) {
-        showIssues(true);
+        await showIssues(true);
       }
       break;
     }
@@ -2038,7 +2152,7 @@ async function handleAction(action, button) {
       await adopt(migrate(draft.project), draft.revision);
       closePanel();
       notify("已打开云端草稿，本机原稿保留在恢复列表");
-      if (resumePublish) showIssues(true);
+      if (resumePublish) await showIssues(true);
       break;
     }
     case "publish":
@@ -2048,7 +2162,7 @@ async function handleAction(action, button) {
         await handleAction("connect", button);
         break;
       }
-      showIssues(true);
+      await showIssues(true);
       break;
     case "confirm-publish": {
       busy = true;
@@ -2106,6 +2220,24 @@ async function handleAction(action, button) {
       closePanel();
       render();
       break;
+    case "locate-issue":
+      await locateIssue(Number(button.dataset.index));
+      break;
+    case "check-again":
+      await showIssues(checkState?.publishing || false);
+      break;
+    case "undo-check-repairs": {
+      if (
+        !checkState?.transaction ||
+        history.past.at(-1) !== checkState.transaction
+      )
+        throw Error("修复后已有其他编辑，请使用顶部撤销或打开修复前副本");
+      history.undo();
+      checkState.repairs = [];
+      checkState.transaction = null;
+      await showIssues(checkState.publishing, { repair: false });
+      break;
+    }
     case "projects": {
       const backups = storage.backups();
       let cloud = [];
@@ -2153,8 +2285,26 @@ async function handleAction(action, button) {
   }
 }
 let suppressClick = false;
+function editableDuration() {
+  const d = duration(s());
+  return Number.isFinite(d) && d > 0
+    ? d
+    : Math.max(
+        1000,
+        ...items()
+          .map((x) => x.end)
+          .filter(Number.isFinite),
+      );
+}
 function timelineSpan() {
-  return Math.max(1000, duration(s())) + Math.max(2000, duration(s()) * 0.15);
+  const d = editableDuration();
+  return Math.max(1000, d) + Math.max(2000, d * 0.15);
+}
+function timelineItemStyle(x, d) {
+  const start = Number.isFinite(x.start) ? Math.max(0, x.start) : 0;
+  const valid =
+    Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start;
+  return `left:${(start / d) * 100}%;width:${valid ? Math.max(0.6, ((x.end - x.start) / d) * 100) : 8}%`;
 }
 function snappedTime(value, exclude, width, alt = false) {
   value = Math.max(0, Math.round(value));
@@ -2246,7 +2396,7 @@ function timelinePointer(e) {
       time = clamp(
         Math.round(((e.clientX - r.left) / r.width) * timelineSpan()),
         0,
-        duration(s()),
+        editableDuration(),
       );
       paintStill();
       updatePlayhead();
@@ -2268,6 +2418,16 @@ function timelinePointer(e) {
   const obj = selectObject(),
     before = clone(obj);
   if (!obj) return;
+  const entry = items().find((x) => x.id === obj.id);
+  if (
+    !entry ||
+    !Number.isFinite(entry.start) ||
+    !Number.isFinite(entry.end) ||
+    entry.end <= entry.start
+  ) {
+    notify("这个片段的时间需要先修复，请在右侧填写有效时间或打开作品检查");
+    return;
+  }
   const rect = clip.parentElement.getBoundingClientRect(),
     span = timelineSpan(),
     source = items().find((x) => x.id === obj.id),
@@ -2538,6 +2698,11 @@ document.addEventListener("click", async (e) => {
       renderOpeningInspector();
       return;
     }
+    if (button?.dataset.action === "close-inspector") {
+      inspectorOpen = false;
+      document.body.dataset.inspector = "false";
+      return;
+    }
     if (button?.dataset.action === "toggle-directory") {
       directoryOpen = !directoryOpen;
       localStorage.setItem("talespark-directory", String(directoryOpen));
@@ -2781,6 +2946,7 @@ $("#importFile").onchange = async (e) => {
   }
 };
 $("#panel").addEventListener("close", () => {
+  checkRequest++;
   clearAssetPreview();
   if (pendingRole) {
     pendingRole = null;
@@ -2862,7 +3028,6 @@ function setupBoard() {
       if (!specialNode(id)) selected = id;
       selection = { kind: "scene" };
       renderInspector();
-      board.highlight();
     },
     open: openGraphNode,
     move: (list) =>
@@ -3051,7 +3216,7 @@ function setupBoard() {
   });
 }
 function renderLibrary() {
-  sidebarLibrary.dispose();
+  if (page !== "story" || graph) sidebarLibrary.dispose();
   if (page !== "assets") mediaLibrary.dispose();
   if (page === "loading" || page === "splash") {
     const parts = {
@@ -3078,7 +3243,7 @@ function renderLibrary() {
     return;
   }
   $(".library").innerHTML =
-    `<div class="sidebar-title">场景 <small>${p().scenes.length}</small></div><input id="scene-search" placeholder="搜索场景" value="${esc(sceneSearch)}">${p()
+    `<div class="sidebar-title">卡片目录 <small>${p().scenes.length}</small></div><input id="scene-search" placeholder="搜索卡片" value="${esc(sceneSearch)}">${p()
       .scenes.filter((x) =>
         x.name.toLowerCase().includes(sceneSearch.toLowerCase()),
       )
@@ -3745,7 +3910,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       showConnection(selected, button.dataset.path);
       break;
     case "check-project":
-      showIssues(false);
+      await showIssues(false);
       break;
     case "help":
       panel(

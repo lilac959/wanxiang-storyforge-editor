@@ -1,3 +1,4 @@
+import { GESTURE_PATHS } from "./ui-components.mjs";
 import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
 import { duration, clamp, gestures, openingRole } from "./model.mjs";
@@ -130,8 +131,10 @@ export class PlayerView {
       }
       if (this.menuOpen) return;
       const choice = e.target.closest("[data-option-id]");
-      if (choice && !this.editing)
+      if (choice && !this.editing) {
+        choice.classList.add("choice-confirmed");
         this.runtime?.resolve(true, choice.dataset.optionId);
+      }
       const hot = e.target.closest("[data-hotspot]");
       if (hot && !this.editing) this.runtime?.resolve(true);
       const select = e.target.closest("[data-edit-event],[data-edit-item]");
@@ -317,33 +320,31 @@ export class PlayerView {
       accent: "#e5d6b1",
       text: "#f8f0e4",
     };
-    this.root.classList.toggle("simple-theme", theme.preset === "simple");
+
     this.root.style.setProperty("--work-accent", theme.accent);
     this.root.style.setProperty("--work-text", theme.text);
   }
   async renderStill(project, scene, time = 0, focusEvent = null) {
+    const request = (this.stillRequest = (this.stillRequest || 0) + 1);
     this.project = project;
     this.applyTheme(project);
     this.still = { scene, time, focusEvent };
-    if (
-      this.stillId !== scene.id ||
-      this.stillSource !==
-        JSON.stringify([scene.source, scene.video, scene.images, scene.clips])
-    ) {
+    const current = mediaAt(scene, time);
+    const source = JSON.stringify([
+      scene.id,
+      current?.kind,
+      current?.assetId,
+      project.assets[current?.assetId],
+    ]);
+    if (this.stillId !== scene.id || this.stillSource !== source) {
       this.stillId = scene.id;
-      this.stillSource = JSON.stringify([
-        scene.source,
-        scene.video,
-        scene.images,
-        scene.clips,
-      ]);
-      await this.mount(scene, time);
+      this.stillSource = source;
+      this.stillMountPromise = this.mount(scene, time);
     }
-    if (
-      scene.source === "sequence" &&
-      this.mountedClipId !== (mediaAt(scene, time)?.id || "gap")
-    )
-      await this.mount(scene, time);
+    await this.stillMountPromise;
+    if (request !== this.stillRequest) return;
+    this.currentClip = current;
+    this.mountedClipId = current?.id || "gap";
     if (this.video && Number.isFinite(this.video.duration)) {
       const wanted =
         (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
@@ -544,11 +545,23 @@ export class PlayerView {
       this.interactionUntil = performance.now() + 500;
       this.pointer = null;
       qteAudio.result(event.ok);
+      if (["qte", "choice"].includes(event.event.kind)) {
+        const ghost = this.hud.cloneNode(true);
+        ghost.classList.add("legacy-result");
+        ghost.inert = true;
+        const qte = ghost.querySelector(".qte");
+        if (qte) {
+          qte.classList.add(event.ok ? "qte-success" : "qte-failed");
+          qte.style.setProperty("--qte-progress", event.ok ? "100" : "0");
+        }
+        this.stage.append(ghost);
+        setTimeout(() => ghost.remove(), 260);
+      }
       const el = this.root.querySelector(".feedback");
       el.textContent = event.ok ? "✓ 操作成功" : "操作超时";
       el.classList.remove("show");
       void el.offsetWidth;
-      el.classList.add("show");
+      if (event.event.kind === "hotspot") el.classList.add("show");
       setTimeout(() => {
         if (!this.runtime?.active) qteAudio.stop();
       }, 300);
@@ -818,10 +831,6 @@ export class PlayerView {
     }
   }
   paintEvent(event) {
-    this.root.classList.toggle(
-      "simple-theme",
-      (event?.uiPreset || this.project?.theme?.preset) === "simple",
-    );
     const key = event
       ? JSON.stringify([event, this.editing ? null : this.runtime?.variables])
       : "";
@@ -833,22 +842,14 @@ export class PlayerView {
     const edit = this.editing ? `data-edit-event="${esc(event.id)}"` : "";
     if (event.kind === "choice") {
       const opts = this.editing ? event.options : this.runtime.visibleOptions();
-      this.hud.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><img alt="" src="assets/ui/option-${i % 2 ? "circle" : "triangle"}.png"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
+      this.hud.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
       if (!opts.length && !this.editing)
         this.showError("当前条件下没有可用选项，请联系作品作者");
     } else if (event.kind === "hotspot")
       this.hud.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
     else {
-      const glyph = {
-        click: "＋",
-        multi: "＋",
-        hold: "◉",
-        up: "↑",
-        down: "↓",
-        left: "←",
-        right: "→",
-      }[event.gesture];
-      this.hud.innerHTML = `<div ${edit} class="qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><span class="qte-hint">${esc(event.hint || gestures[event.gesture])}</span><div class="qte-frame"><svg viewBox="0 0 100 100"><circle class="ring" cx="50" cy="50" r="36"/><circle class="meter" cx="50" cy="50" r="36" pathLength="100"/></svg><b>${glyph}</b></div><div class="qte-progress"></div><small class="qte-count"></small></div>`;
+      const glyph = GESTURE_PATHS[event.gesture] || GESTURE_PATHS.click;
+      this.hud.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;
     }
   }
   paintHud() {
@@ -864,6 +865,13 @@ export class PlayerView {
     const el = this.hud.querySelector(".qte");
     if (el) {
       el.style.setProperty("--progress", String((active.progress || 0) * 100));
+      el.style.setProperty(
+        "--qte-progress",
+        String((active.progress || 0) * 100),
+      );
+      el.querySelectorAll(".qte-segments i").forEach((segment, i) =>
+        segment.classList.toggle("filled", i < (active.clicks || 0)),
+      );
       el.querySelector(".qte-count").textContent =
         e.gesture === "multi"
           ? `${active.clicks || 0} / ${e.clicks}`

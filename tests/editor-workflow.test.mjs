@@ -183,3 +183,18 @@ test("opening layout survives migration and rejects invalid positions", () => {
     true,
   );
 });
+
+test("removed simple UI migrates to original components without changing story options", () => {
+  const p = newProject();
+  p.theme.preset = "simple";
+  const e = newEvent(0, "choice", 1000);
+  e.uiComponent = "simple-choice@1";
+  e.uiPreset = "simple";
+  p.scenes[0].events = [e];
+  const options = clone(e.options);
+  const restored = migrate(p);
+  assert.equal(restored.theme.preset, "classic");
+  assert.equal(restored.scenes[0].events[0].uiComponent, "classic-choice@1");
+  assert.equal(restored.scenes[0].events[0].uiPreset, "classic");
+  assert.deepEqual(restored.scenes[0].events[0].options, options);
+});

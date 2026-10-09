@@ -37,15 +37,20 @@ export function ensureSequence(s) {
   return s.clips;
 }
 export function appendVisual(s, a) {
+  const length = a.kind === "image" ? 3000 : a.durationMs;
+  if (!Number.isSafeInteger(length) || length < 100)
+    throw Error("素材时长尚未读取，请先检查作品或重新导入素材");
   const clips = ensureSequence(s),
     startMs = Math.max(0, ...clips.map((c) => c.startMs + clipLength(c)));
+  if (!Number.isFinite(startMs))
+    throw Error("已有画面片段的时间无效，请先通过作品检查修复");
   const c = {
     id: id(),
     assetId: a.id,
     kind: a.kind,
     startMs,
     inMs: 0,
-    outMs: a.kind === "image" ? 3000 : a.durationMs,
+    outMs: length,
   };
   clips.push(c);
   return c;

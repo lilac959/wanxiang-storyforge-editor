@@ -115,7 +115,7 @@ export function newProject(name = "未命名作品") {
     name,
     entryId: s.id,
     variables: {},
-    theme: { preset: "simple", accent: "#7165ef", text: "#ffffff" },
+    theme: { preset: "classic", accent: "#e5d6b1", text: "#f8f0e4" },
     assets: {},
     scenes: [s],
     loading: {
@@ -169,6 +169,13 @@ export function openingElements(scene) {
   return scene.opening.elements;
 }
 export function unifyCards(project) {
+  if (project.theme?.preset === "simple") project.theme.preset = "classic";
+  for (const scene of project.scenes)
+    for (const e of scene.events || []) {
+      if (e.uiComponent === "simple-choice@1")
+        e.uiComponent = "classic-choice@1";
+      if (e.uiPreset === "simple") e.uiPreset = "classic";
+    }
   if (project.unifiedCards) return project;
   project.editor ||= { positions: {} };
   project.editor.positions ||= {};
@@ -530,11 +537,12 @@ export function migrate(input) {
 }
 // The same runtime validation is used by imports, drafts and the server.
 export function validate(p, { publish = false } = {}) {
+  let context = {};
   const issues = [],
     error = (message, sceneId, code = "data") =>
-      issues.push({ level: "error", message, sceneId, code }),
+      issues.push({ level: "error", message, sceneId, code, ...context }),
     warn = (message, sceneId) =>
-      issues.push({ level: "warning", message, sceneId });
+      issues.push({ level: "warning", message, sceneId, ...context });
   const integer = (n) => Number.isSafeInteger(n) && n >= 0,
     id = (x) => typeof x === "string" && /^[\w-]{1,160}$/.test(x),
     str = (x) => typeof x === "string",
@@ -605,6 +613,14 @@ export function validate(p, { publish = false } = {}) {
   for (const role of ["loading", "splash"])
     if (p.scenes.filter((s) => s.role === role).length > 1)
       error("加载和开屏各最多一张卡片");
+  let activeScenes;
+  try {
+    activeScenes = reachable(p);
+  } catch {
+    /* malformed routes are checked below */
+  }
+  const requiredAtRelease = (s) =>
+    publish && (!activeScenes || activeScenes.has(s.id) || openingRole(s));
   for (const [key, value] of Object.entries(p.variables))
     if (
       !id(key) ||
@@ -648,7 +664,7 @@ export function validate(p, { publish = false } = {}) {
       return;
     }
     if (t.kind === "unlinked")
-      (publish ? error : warn)("存在未连接的剧情出口", s.id);
+      (requiredAtRelease(s) ? error : warn)("存在未连接的剧情出口", s.id);
     if (t.kind === "scene" && !ids.has(t.sceneId))
       error("连接的剧情段落不存在", s.id);
     if (t.kind === "seek" && (!integer(t.timeMs) || t.timeMs > duration(s)))
@@ -787,6 +803,12 @@ export function validate(p, { publish = false } = {}) {
       );
       let end = 0;
       for (const c of clips) {
+        context = {
+          itemKind: "clip",
+          itemId: c?.id,
+          assetId: c?.assetId,
+          timeMs: c?.startMs,
+        };
         if (!c || !["video", "image"].includes(c.kind)) {
           error("画面片段结构无效", s.id, "structure");
           continue;
@@ -809,10 +831,16 @@ export function validate(p, { publish = false } = {}) {
         )
           error("片段出点超过素材时长", s.id);
       }
-      if (publish && s.role === "story" && !clips.length)
+      if (requiredAtRelease(s) && s.role === "story" && !clips.length)
         error("场景缺少画面素材", s.id);
     }
     if (s.video) {
+      context = {
+        itemKind: "video",
+        itemId: s.video.id,
+        assetId: s.video.assetId,
+        timeMs: 0,
+      };
       unique(s.video.id, "视频片段", s.id);
       ref(s.video.assetId, s.id, "video");
       if (
@@ -826,6 +854,7 @@ export function validate(p, { publish = false } = {}) {
         error("视频出点超过素材时长", s.id);
     }
     for (const f of s.images) {
+      context = { itemKind: "image", itemId: f?.id, assetId: f?.assetId };
       if (!f) {
         error("图片片段无效", s.id, "structure");
         return issues;
@@ -835,16 +864,31 @@ export function validate(p, { publish = false } = {}) {
       if (!integer(f.durationMs) || f.durationMs < 100)
         error("图片展示时长至少为 0.1 秒", s.id);
     }
+    context = {};
     const d = duration(s);
     if (!integer(d) || d < 1 || d > 7200000) error("剧情时长无效", s.id);
     if (s.source === "images" && !s.images.length)
       error("图片段落尚未添加图片", s.id);
-    if (publish && s.pending)
+    if (requiredAtRelease(s) && s.pending)
       error("请完成待配置段落，或取消其待配置标记", s.id);
-    if (publish && s.role === "story" && s.source === "video" && !s.video)
+    if (
+      requiredAtRelease(s) &&
+      s.role === "story" &&
+      s.source === "video" &&
+      !s.video
+    )
       error("剧情段落缺少视频或图片", s.id);
+    context = {
+      routePath: "next",
+      label: openingRole(s)
+        ? s.role === "loading"
+          ? "加载完成"
+          : "点击开始"
+        : "播放结束",
+    };
     target(s.next, s);
     const interval = (x, label) => {
+      context = { ...context, routePath: undefined };
       unique(x.id, label, s.id);
       if (
         !integer(x.startMs) ||
@@ -855,6 +899,12 @@ export function validate(p, { publish = false } = {}) {
         error(`${label}时间超出段落范围`, s.id);
     };
     for (const x of s.overlays || []) {
+      context = {
+        itemKind: "overlay",
+        itemId: x?.id,
+        assetId: x?.assetId,
+        timeMs: x?.startMs,
+      };
       interval(x, "图片叠加");
       ref(x.assetId, s.id, "image");
       if (
@@ -877,6 +927,7 @@ export function validate(p, { publish = false } = {}) {
       )
         error("关联的画面片段不存在", s.id);
     for (const x of s.subtitles) {
+      context = { itemKind: "subtitle", itemId: x?.id, timeMs: x?.startMs };
       if (!x || !str(x.text)) {
         error("字幕结构无效", s.id, "structure");
         return issues;
@@ -891,6 +942,12 @@ export function validate(p, { publish = false } = {}) {
         error("字幕位置或样式无效", s.id);
     }
     for (const x of s.audio) {
+      context = {
+        itemKind: "audio",
+        itemId: x?.id,
+        assetId: x?.assetId,
+        timeMs: x?.startMs,
+      };
       if (!x) {
         error("音频结构无效", s.id, "structure");
         return issues;
@@ -904,6 +961,7 @@ export function validate(p, { publish = false } = {}) {
         error("音频范围超过素材时长", s.id);
     }
     for (const x of s.effects) {
+      context = { itemKind: "effect", itemId: x?.id, timeMs: x?.startMs };
       if (!x) {
         error("效果结构无效", s.id, "structure");
         return issues;
@@ -933,6 +991,18 @@ export function validate(p, { publish = false } = {}) {
     }
     const evs = [...s.events].sort((a, b) => a.startMs - b.startMs);
     for (const e of evs) {
+      context = {
+        itemKind: "event",
+        itemId: e?.id,
+        timeMs: e?.startMs,
+        label:
+          e?.hint ||
+          (e?.kind === "choice"
+            ? "选择互动"
+            : e?.kind === "hotspot"
+              ? "热点互动"
+              : gestures[e?.gesture] || "操作互动"),
+      };
       if (!e || !Array.isArray(e.options) || !e.success || !e.failure) {
         error("互动结构无效", s.id, "structure");
         return issues;
@@ -977,6 +1047,11 @@ export function validate(p, { publish = false } = {}) {
         error("长按时长不能超过操作倒计时", s.id);
       condition(e.condition, s.id);
       for (const result of [e.success, e.failure]) {
+        context = {
+          ...context,
+          routePath: `events.${s.events.indexOf(e)}.${result === e.success ? "success" : "failure"}.target`,
+          label: `${e.hint || gestures[e.gesture] || "互动"} · ${result === e.success ? "成功" : "失败 / 超时"}`,
+        };
         target(result.target, s);
         actions(result.actions, s.id);
         if (!["immediate", "sceneEnd"].includes(result.timing))
@@ -990,6 +1065,11 @@ export function validate(p, { publish = false } = {}) {
           return issues;
         }
         unique(o.id, "选项", s.id);
+        context = {
+          ...context,
+          label: o.text || "选项",
+          routePath: `events.${s.events.indexOf(e)}.options.${e.options.indexOf(o)}.target`,
+        };
         target(o.target, s);
         condition(o.condition, s.id);
         actions(o.actions, s.id);
@@ -1004,12 +1084,21 @@ export function validate(p, { publish = false } = {}) {
       )
         error("至少保留一个无条件选项，防止没有可选路线", s.id);
     }
-    for (let i = 1; i < evs.length; i++)
-      if (
-        evs[i].startMs === evs[i - 1].startMs ||
-        evs[i].startMs < evs[i - 1].endMs
-      )
-        error("互动区间重叠，请安排为先后出现", s.id);
+    for (let i = 0; i < evs.length; i++)
+      for (let j = 0; j < i; j++)
+        if (
+          evs[i].startMs === evs[j].startMs ||
+          evs[i].startMs < evs[j].endMs
+        ) {
+          context = {
+            itemKind: "event",
+            itemId: evs[i].id,
+            relatedId: evs[j].id,
+            timeMs: evs[i].startMs,
+          };
+          error("互动区间重叠，请安排为先后出现", s.id);
+        }
+    context = {};
   }
   if (issues.some((x) => x.code === "structure")) return issues;
   const reach = reachable(p);

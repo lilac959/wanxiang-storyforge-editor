@@ -617,26 +617,6 @@ button:disabled {
   height: auto;
   object-fit: contain;
 }
-.simple-theme .choices button {
-  background: #161726dc;
-  background-image: none;
-  border: 1px solid var(--work-accent);
-  border-radius: 10px;
-  color: var(--work-text);
-  padding: 12px 20px;
-}
-.simple-theme .choices button:before,
-.simple-theme .choices img {
-  display: none;
-}
-.simple-theme .hotspot {
-  border-color: var(--work-accent);
-  color: var(--work-text);
-}
-.simple-theme .qte .meter {
-  stroke: var(--work-accent);
-}
-
 /* Immersive playback: controls are only visible in the settings menu. */
 .player-root .settings-toggle {
   position: absolute;
@@ -709,4 +689,354 @@ button:disabled {
 .settings-confirm[hidden],
 .settings-toggle[hidden] {
   display: none !important;
+}
+
+/* Original interaction UI, shared by editor previews and published works. */
+.mechanical-qte.psd-qte {
+  width: clamp(68px, 11cqw, 150px);
+  gap: 0;
+  color: #fff4e1;
+  filter: drop-shadow(0 2px 2px #0006);
+  animation: psd-enter 0.25s ease-out both;
+}
+.psd-qte-surface {
+  width: 100%;
+  transform: perspective(480px) rotateY(-13deg) rotateZ(4deg);
+}
+.psd-qte .qte-hint {
+  display: block;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: clamp(10px, 1.2cqw, 17px);
+  font-weight: 400;
+  letter-spacing: 1px;
+  color: #fff6e8;
+  white-space: nowrap;
+}
+.psd-qte .qte-hint:before,
+.psd-qte .qte-hint:after {
+  display: none;
+}
+.psd-qte-tile {
+  width: 100%;
+  aspect-ratio: 82/81;
+  position: relative;
+  background: url("../assets/ui/qte-original-frame.png") center/100% 100%
+    no-repeat;
+}
+.psd-qte-tile svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+}
+.ring {
+  stroke: #fff4e1;
+  stroke-opacity: 0.64;
+  stroke-width: 1.8;
+}
+.meter {
+  stroke: #ffbd22;
+  stroke-width: 2.5;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--qte-progress));
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 0.1s linear;
+}
+.psd-glyph {
+  stroke: #fff8ec;
+  stroke-width: 2.1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.psd-qte .qte-segments {
+  position: absolute;
+  bottom: 6%;
+  left: 26%;
+  width: 48%;
+  gap: 3px;
+}
+.psd-qte .qte-segments i {
+  height: 2px;
+  background: #f7ecda55;
+  border: 0;
+  min-width: 0;
+}
+.psd-qte .qte-segments i.filled {
+  background: #ffc84e;
+  box-shadow: 0 0 4px #ffc84e44;
+}
+.psd-qte .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip-path: inset(50%);
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+.psd-qte.qte-success .psd-qte-tile {
+  animation: psd-flash 0.25s ease-out;
+}
+.psd-qte.qte-success .psd-glyph {
+  stroke: #ffdb85;
+}
+.psd-qte.qte-failed .meter {
+  stroke: #d18d72;
+}
+.psd-qte.qte-failed .psd-qte-tile {
+  opacity: 0.5;
+}
+.psd-qte.urgent:not(.qte-success):not(.qte-failed) .ring {
+  animation: psd-urgent 0.65s ease-in-out infinite;
+}
+.play-stage .choices {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  bottom: 6%;
+  width: auto;
+  max-width: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, min(26cqw, 280px)));
+  justify-content: center;
+  align-items: end;
+  gap: 10px clamp(20px, 4cqw, 64px);
+  padding: 0;
+  transform: none;
+  pointer-events: none;
+}
+.play-stage .choices[hidden] {
+  display: none;
+}
+.play-stage .choices button {
+  --choice-icon: url("../assets/ui/option-triangle.png");
+  position: relative;
+  pointer-events: auto;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  aspect-ratio: 3/1;
+  border: 1px solid #b9a36b55;
+  border-radius: 0;
+  background-color: #272825b8;
+  background-image:
+    linear-gradient(#edb52e, #edb52e), linear-gradient(#edb52e, #edb52e),
+    linear-gradient(#edb52e, #edb52e), linear-gradient(#edb52e, #edb52e),
+    linear-gradient(#edb52e, #edb52e), linear-gradient(#edb52e, #edb52e),
+    linear-gradient(#edb52e, #edb52e), linear-gradient(#edb52e, #edb52e);
+  background-position:
+    left top,
+    left top,
+    right top,
+    right top,
+    left bottom,
+    left bottom,
+    right bottom,
+    right bottom;
+  background-size:
+    17px 2px,
+    2px 17px;
+  background-repeat: no-repeat;
+  box-shadow: 0 3px 9px #0003;
+  backdrop-filter: none;
+  padding: 3% 8% 3% 35%;
+  color: #f8f0e4;
+  font-family: "Microsoft YaHei Light", "Microsoft YaHei", sans-serif;
+  font-size: clamp(12px, 1.7cqw, 24px);
+  font-weight: 300;
+  letter-spacing: 1px;
+  text-align: center;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  animation: psd-choice 0.25s ease-out both;
+  transition:
+    background-color 0.14s,
+    box-shadow 0.14s,
+    transform 0.1s;
+  transform: none;
+  filter: none;
+}
+.play-stage .choices button:nth-child(even) {
+  --choice-icon: url("../assets/ui/option-circle.png");
+  animation-delay: 0.06s;
+}
+.play-stage .choices button:before {
+  content: "";
+  display: block;
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 32%;
+  height: 100%;
+  border: 0;
+  border-right: 1px solid #d3ae5566;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: var(--choice-icon);
+  background-size: 65% 65%;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+.play-stage .choices button:after {
+  content: "✓";
+  display: none;
+  position: absolute;
+  inset: 4px 6px auto auto;
+  width: auto;
+  height: auto;
+  background: none;
+  border: 0;
+  color: #332006;
+  font-size: 15px;
+  pointer-events: none;
+}
+.play-stage
+  .choices
+  button:is(:hover, :focus-visible):not(:active):not(.choice-confirmed) {
+  background-color: #65512bbf;
+  border-color: #ffe09a;
+  box-shadow:
+    0 0 0 1px #eac56a66,
+    0 0 17px #ffd57044;
+  transform: translateY(-2px);
+  color: #fff6d5;
+  filter: none;
+}
+.play-stage .choices button:focus-visible {
+  outline: 1px solid #ffd36d;
+  outline-offset: 3px;
+}
+.play-stage .choices button:is(:active, .choice-confirmed) {
+  background-color: #f0c76c;
+  color: #302616;
+  border-color: #ffe9ad;
+  box-shadow: 0 0 20px #e7b34155;
+  transform: none;
+  filter: none;
+  font-weight: 500;
+}
+.play-stage .choices button:is(:active, .choice-confirmed):before {
+  background-color: #3a332ac9;
+  border-right-color: #fff0bd77;
+}
+.play-stage .choices button:is(:active, .choice-confirmed):after {
+  display: block;
+}
+.play-stage
+  .choices:has(button:active, button.choice-confirmed)
+  button:not(:active):not(.choice-confirmed) {
+  opacity: 0.45;
+  transition: opacity 0.12s;
+}
+@keyframes psd-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes psd-choice {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes psd-flash {
+  50% {
+    filter: drop-shadow(0 0 8px #ffdc8599);
+  }
+}
+@keyframes psd-urgent {
+  50% {
+    stroke: #ffc268;
+    stroke-opacity: 1;
+  }
+}
+@media (pointer: coarse) and (orientation: landscape) {
+  .mechanical-qte.psd-qte {
+    width: clamp(64px, 10cqw, 110px);
+  }
+  .psd-qte .qte-hint {
+    font-size: clamp(10px, 1.5cqw, 15px);
+    margin-bottom: 6px;
+  }
+  .play-stage .choices {
+    left: 5%;
+    right: 5%;
+    bottom: 6%;
+    width: auto;
+    gap: 8px clamp(18px, 4cqw, 40px);
+  }
+  .play-stage .choices button {
+    font-size: clamp(12px, 1.7cqw, 20px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .psd-qte,
+  .psd-qte *,
+  .play-stage .choices button {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.qte.psd-qte {
+  transform: scale(var(--scale, 1));
+  pointer-events: none;
+  --qte-progress: 0;
+}
+.psd-qte .qte-hint {
+  position: static;
+  translate: none;
+  text-align: left;
+}
+.psd-qte svg {
+  transform: none;
+}
+.psd-qte .qte-segments {
+  display: flex;
+}
+.psd-qte .qte-segments i {
+  flex: 1;
+}
+.play-stage .choices button {
+  max-width: none;
+}
+.play-stage .choices button img {
+  display: none;
+}
+
+.psd-qte .ring {
+  stroke: #fff4e1;
+  stroke-opacity: 0.64;
+  stroke-width: 1.8;
+}
+.psd-qte .meter {
+  stroke: #ffbd22;
+  stroke-width: 2.5;
+}
+.legacy-result {
+  z-index: 8;
+  pointer-events: none;
+}
+.legacy-result * {
+  pointer-events: none !important;
+}
+.legacy-result .choices button {
+  animation: none;
+}
+.psd-qte .meter {
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--qte-progress));
+  transform: rotate(-90deg);
+  transform-origin: center;
 }
