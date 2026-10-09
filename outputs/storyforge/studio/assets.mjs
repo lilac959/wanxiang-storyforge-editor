@@ -1,4 +1,26 @@
-import { uid } from "./model.mjs";
+import { uid, resolveOpeningDuration } from "./model.mjs";
+export async function resolveOpeningMedia(project, store) {
+  const ids = [
+    ...new Set(
+      project.scenes.flatMap((scene) =>
+        (scene.clips || [])
+          .filter(
+            (c) =>
+              c.id === `${scene.id}-background` &&
+              c.kind === "video" &&
+              !project.assets[c.assetId]?.durationMs,
+          )
+          .map((c) => c.assetId),
+      ),
+    ),
+  ];
+  await Promise.all(
+    ids.map(async (id) => {
+      const meta = await inspect(await store.url(project.assets[id]), "video");
+      resolveOpeningDuration(project, id, meta.durationMs);
+    }),
+  );
+}
 const maxSize = 1024 * 1024 * 1024;
 export class AssetStore {
   constructor() {

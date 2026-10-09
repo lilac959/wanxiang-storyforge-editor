@@ -3,6 +3,12 @@ export const SPLASH = "@splash";
 export const NODE_WIDTH = 240;
 export const specialNode = (id) => id === LOADING || id === SPLASH;
 export function flowNodes(project) {
+  if (project.unifiedCards)
+    return [
+      ...project.scenes.filter((s) => s.role === "loading"),
+      ...project.scenes.filter((s) => s.role === "splash"),
+      ...project.scenes.filter((s) => !["loading", "splash"].includes(s.role)),
+    ];
   return [
     { id: LOADING, name: "加载", role: "loading" },
     { id: SPLASH, name: "开屏", role: "splash" },
@@ -10,6 +16,14 @@ export function flowNodes(project) {
   ];
 }
 export function flowPorts(project, node, ports) {
+  if (project.unifiedCards && ["loading", "splash"].includes(node.role))
+    return [
+      {
+        path: "next",
+        label: node.role === "loading" ? "加载完成" : "点击开始",
+        target: node.next,
+      },
+    ];
   if (node.id === LOADING)
     return [
       {
@@ -30,12 +44,28 @@ export function flowPorts(project, node, ports) {
   return ports(node)
     .map((p) =>
       p.target.kind === "home"
-        ? { ...p, target: { kind: "scene", sceneId: SPLASH } }
+        ? {
+            ...p,
+            target: {
+              kind: "scene",
+              sceneId: project.unifiedCards
+                ? project.scenes.find((s) => s.role === "splash")?.id ||
+                  project.entryId
+                : SPLASH,
+            },
+          }
         : p,
     )
     .filter((p) => p.target.kind !== "continue" && p.target.kind !== "seek");
 }
 export function flowPositions(project) {
+  if (project.unifiedCards)
+    return Object.fromEntries(
+      project.scenes.map((s, i) => [
+        s.id,
+        project.editor.positions[s.id] || { x: 60 + i * 320, y: 100 },
+      ]),
+    );
   const original = project.editor.positions,
     shift = original[LOADING] ? 0 : 640;
   const positions = Object.fromEntries(
@@ -79,7 +109,12 @@ export function arrangeFlow(project, ports, subset = null) {
     reachable.add(id);
     for (const t of adjacency.get(id) || []) mark(t);
   };
-  mark(LOADING);
+  const start = project.unifiedCards
+    ? nodes.find((n) => n.role === "loading")?.id ||
+      nodes.find((n) => n.role === "splash")?.id ||
+      project.entryId
+    : LOADING;
+  mark(start);
   const visit = (id) => {
     if (state.get(id)) return;
     state.set(id, 1);
@@ -91,7 +126,7 @@ export function arrangeFlow(project, ports, subset = null) {
     state.set(id, 2);
     order.push(id);
   };
-  visit(LOADING);
+  visit(start);
   for (const n of nodes) visit(n.id);
   order.reverse();
   const rank = new Map(nodes.map((n) => [n.id, 0]));

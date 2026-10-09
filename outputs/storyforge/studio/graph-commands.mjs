@@ -20,6 +20,11 @@ export function copyScenes(project, ids) {
     fresh(c);
     c.id = sceneIds.get(s.id);
     c.name += " 副本";
+    if (["loading", "splash"].includes(c.role)) {
+      c.role = "story";
+      if (c.savedRoutes) c.next = clone(c.savedRoutes.next);
+      delete c.savedRoutes;
+    }
     for (const k of ["events", "audio", "subtitles", "effects", "overlays"])
       for (const x of c[k] || [])
         if (x.linkedClipId)
@@ -45,7 +50,12 @@ export function deleteScenes(project, ids, newEntry) {
   const keep = project.scenes.filter((s) => !ids.includes(s.id));
   if (!keep.length) throw Error("至少保留一个场景");
   if (ids.includes(project.entryId)) {
-    if (!keep.some((s) => s.id === newEntry)) throw Error("请选择新的故事入口");
+    if (
+      !keep.some(
+        (s) => s.id === newEntry && !["loading", "splash"].includes(s.role),
+      )
+    )
+      throw Error("请选择新的故事入口");
     project.entryId = newEntry;
   }
   project.scenes = keep;
@@ -53,7 +63,13 @@ export function deleteScenes(project, ids, newEntry) {
   for (const s of keep)
     for (const t of targetsOf(s))
       if (t.kind === "scene" && ids.includes(t.sceneId)) {
-        t.kind = "unlinked";
-        delete t.sceneId;
+        if (["loading", "splash"].includes(s.role))
+          t.sceneId =
+            keep.find((n) => s.role === "loading" && n.role === "splash")?.id ||
+            project.entryId;
+        else {
+          t.kind = "unlinked";
+          delete t.sceneId;
+        }
       }
 }

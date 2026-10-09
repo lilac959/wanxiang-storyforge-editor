@@ -262,7 +262,14 @@ test("the actual repository project snapshot migrates and round-trips without to
   assert.ok(raw);
   const before = JSON.stringify(raw),
     p = migrate(raw);
-  assert.equal(p.scenes.length, raw.nodes.length);
+  assert.equal(
+    p.scenes.filter((s) => !["loading", "splash"].includes(s.role)).length,
+    raw.nodes.length,
+  );
+  assert.equal(
+    p.scenes.filter((s) => ["loading", "splash"].includes(s.role)).length,
+    2,
+  );
   assert.equal(JSON.stringify(raw), before);
   assert.deepEqual(
     validate(p).filter((x) => x.level === "error"),

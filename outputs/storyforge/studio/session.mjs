@@ -1,8 +1,9 @@
 import { visualClips } from "./timeline.mjs";
 import { PlayerView } from "./player-view.mjs";
-import { inspect } from "./assets.mjs";
+import { inspect, resolveOpeningMedia } from "./assets.mjs";
 import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
+import { openingCard } from "./model.mjs";
 export class Session {
   constructor(root, assets, { onExit = () => {}, editor = false } = {}) {
     this.root = root;
@@ -63,6 +64,17 @@ export class Session {
     this.project = structuredClone(project);
     const p = this.project,
       token = this.token;
+    if (p.unifiedCards) {
+      await resolveOpeningMedia(p, this.assets);
+      if (token !== this.token) return;
+      const scene = p.scenes.find((s) => s.id === sceneId);
+      if (sceneId && scene?.role !== "loading") {
+        this.play(sceneId, time);
+        return;
+      }
+      await this.openUnified({ only, design, sceneId });
+      return;
+    }
     if (sceneId) {
       this.play(sceneId, time);
       return;
@@ -114,6 +126,10 @@ export class Session {
           await inspect(await this.assets.url(a), a.kind);
           if (token !== this.token) return;
           ready++;
+          if (this.player)
+            this.player.loadingProgress = Math.round(
+              (ready / ids.length) * 100,
+            );
           this.root.querySelector("progress").value = Math.round(
             (ready / ids.length) * 100,
           );
@@ -145,6 +161,12 @@ export class Session {
     }
   }
   async home(design = false) {
+    if (this.project.unifiedCards) {
+      this.play(
+        openingCard(this.project, "splash")?.id || this.project.entryId,
+      );
+      return;
+    }
     this.clear();
     const token = this.token,
       p = this.project,
@@ -235,12 +257,114 @@ export class Session {
     }
   }
   play(sceneId, time = 0) {
+    if (
+      this.project.unifiedCards &&
+      this.project.scenes.find((s) => s.id === sceneId)?.role === "loading"
+    ) {
+      this.openUnified({ sceneId });
+      return;
+    }
     this.clear();
     this.root.innerHTML = '<div class="player-root"></div>';
     this.player = new PlayerView(this.root.firstElementChild, this.assets, {
       onExit: () => this.home(),
     });
     this.player.start(this.project, sceneId, time);
+    if (this.project.unifiedCards) {
+      this.key = (e) => {
+        const r = this.player?.runtime;
+        if (
+          r?.scene.role !== "splash" ||
+          this.player.menuOpen ||
+          e.ctrlKey ||
+          e.metaKey ||
+          e.altKey ||
+          ["Tab", "Escape"].includes(e.key) ||
+          e.target.closest("input,textarea,select")
+        )
+          return;
+        e.preventDefault();
+        qteAudio.unlock();
+        r.follow(r.scene.next);
+      };
+      document.addEventListener("keydown", this.key, true);
+    }
+  }
+  async openUnified({ only = null, design = false, sceneId = null } = {}) {
+    this.clear();
+    const p = this.project,
+      token = this.token,
+      loading = sceneId
+        ? p.scenes.find((s) => s.id === sceneId)
+        : openingCard(p, "loading"),
+      splash = openingCard(p, "splash");
+    try {
+      if (loading) {
+        this.root.innerHTML = '<div class="player-root"></div>';
+        this.player = new PlayerView(this.root.firstElementChild, this.assets, {
+          onExit: () => this.home(),
+        });
+        await this.player.start(p, loading.id);
+      } else {
+        this.root.innerHTML =
+          '<div class="opening"><div class="opening-frame" style="width:70%;height:100px"><div class="load-progress" style="width:100%;left:0;bottom:30%"><span>正在准备资源</span><progress max="100" value="0"></progress></div></div></div>';
+      }
+      if (design) return;
+      const entry = p.scenes.find((s) => s.id === p.entryId),
+        ids = [
+          ...new Set(
+            [loading, splash, entry]
+              .filter(Boolean)
+              .flatMap((s) => [
+                ...visualClips(s).map((c) => c.assetId),
+                ...(s.opening?.image ? [s.opening.image] : []),
+                ...(s.audio || []).map((c) => c.assetId),
+                ...(s.overlays || []).map((c) => c.assetId),
+              ]),
+          ),
+        ];
+      const began = performance.now();
+      let ready = 0;
+      await Promise.all(
+        ids.map(async (id) => {
+          const a = p.assets[id];
+          if (!a) throw Error("开场素材缺失");
+          await inspect(await this.assets.url(a), a.kind);
+          if (token !== this.token) return;
+          ready++;
+          const progress = this.root.querySelector("progress");
+          if (progress) progress.value = Math.round((ready / ids.length) * 100);
+        }),
+      );
+      if (token !== this.token) return;
+      if (this.player) this.player.loadingProgress = 100;
+      const progress = this.root.querySelector("progress");
+      if (progress) progress.value = 100;
+      await new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Math.max(
+            0,
+            (loading?.opening?.minimumMs || 0) - (performance.now() - began),
+          ),
+        ),
+      );
+      if (token !== this.token) return;
+      if (only === "loading") {
+        this.player?.runtime?.pause();
+        return;
+      }
+      const target = loading?.next;
+      if (target?.kind === "scene") this.play(target.sceneId);
+      else if (target?.kind === "unlinked")
+        throw Error("加载卡片尚未连接后续卡片");
+      else this.play(splash?.id || p.entryId);
+    } catch (error) {
+      if (token !== this.token) return;
+      this.clear();
+      this.root.innerHTML = `<div class="opening"><div class="opening-error"><h2>暂时无法开始</h2><p>${esc(error.message)}</p><button>重试加载</button></div></div>`;
+      this.root.querySelector("button").onclick = () => this.open(p);
+    }
   }
   dispose() {
     this.clear();

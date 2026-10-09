@@ -10,12 +10,17 @@ const labels = {
 };
 export function mediaUses(project, id) {
   const found = [];
-  if ([project.loading.image, project.loading.video].includes(id))
+  if (
+    !project.unifiedCards &&
+    [project.loading.image, project.loading.video].includes(id)
+  )
     found.push({ id: "@loading", name: "加载" });
-  if (project.splash.video === id) found.push({ id: "@splash", name: "开屏" });
+  if (!project.unifiedCards && project.splash.video === id)
+    found.push({ id: "@splash", name: "开屏" });
   for (const s of project.scenes) {
     const ids = [
       s.video?.assetId,
+      s.opening?.image,
       ...(s.clips || []).map((c) => c.assetId),
       ...(s.images || []).map((c) => c.assetId),
       ...(s.audio || []).map((c) => c.assetId),

@@ -132,15 +132,164 @@ export function newProject(name = "未命名作品") {
     editor: { positions: { [s.id]: { x: 60, y: 60 } } },
   };
 }
+export const openingRole = (scene) =>
+  ["loading", "splash"].includes(scene?.role);
+export const openingCard = (project, role) =>
+  project.scenes.find((s) => s.role === role);
+export function resolveOpeningDuration(project, assetId, durationMs) {
+  if (!Number.isInteger(durationMs) || durationMs < 100) return;
+  for (const scene of project.scenes) {
+    const clip = scene.clips?.find(
+      (c) => c.assetId === assetId && c.id === `${scene.id}-background`,
+    );
+    if (!clip || project.assets[assetId]?.durationMs) continue;
+    const before = duration(scene);
+    clip.outMs = durationMs;
+    for (const range of Object.values(scene.opening?.elements || {}))
+      if (range.startMs === 0 && range.endMs === before)
+        range.endMs = duration(scene);
+  }
+  if (project.assets[assetId]) project.assets[assetId].durationMs = durationMs;
+}
+export function openingElements(scene) {
+  const keys =
+    scene.role === "loading"
+      ? ["title", "subtitle", "progress"]
+      : ["title", "subtitle", "start"];
+  scene.opening ||= {};
+  scene.opening.elements ||= {};
+  for (const key of keys) {
+    scene.opening.elements[key] ||= {
+      startMs: 0,
+      endMs: Math.max(100, duration(scene)),
+      hidden: false,
+    };
+    scene.opening.elements[key].id = key;
+  }
+  return scene.opening.elements;
+}
+export function unifyCards(project) {
+  if (project.unifiedCards) return project;
+  project.editor ||= { positions: {} };
+  project.editor.positions ||= {};
+  const entry = project.editor.positions[project.entryId] || { x: 60, y: 100 };
+  for (const s of project.scenes) {
+    const at = project.editor.positions[s.id];
+    if (at && !project.editor.positions["@loading"]) at.x += 640;
+  }
+  const cards = ["loading", "splash"].map((role, i) => {
+    const scene = newScene(role === "loading" ? "加载" : "开屏");
+    // Stable identities make repeated imports and round-trips idempotent.
+    scene.id = `${project.id}-opening-${role}`;
+    scene.role = role;
+    scene.opening = clone(project[role]);
+    scene.openingPurpose = role;
+    scene.opening.loop = true;
+    const aid = project[role].video || project[role].image;
+    const a = project.assets[aid];
+    scene.source = "sequence";
+    scene.clips = a
+      ? [
+          {
+            id: `${scene.id}-background`,
+            assetId: aid,
+            kind: a.kind,
+            startMs: 0,
+            inMs: 0,
+            outMs: Math.max(100, a.durationMs || 8000),
+          },
+        ]
+      : [];
+    openingElements(scene);
+    project.editor.positions[scene.id] = project.editor.positions[
+      role === "loading" ? "@loading" : "@splash"
+    ] || { x: 60 + i * 320, y: entry.y };
+    return scene;
+  });
+  cards[0].next = sceneTarget(cards[1].id);
+  cards[1].next = sceneTarget(project.entryId);
+  project.scenes.push(...cards);
+  delete project.editor.positions["@loading"];
+  delete project.editor.positions["@splash"];
+  project.unifiedCards = true;
+  return project;
+}
+export function changeRole(project, id, role) {
+  const scene = project.scenes.find((s) => s.id === id);
+  if (
+    !scene ||
+    !["story", "loading", "splash", "ending", "death"].includes(role)
+  )
+    throw Error("卡片用途无效");
+  if (openingRole({ role }) && project.entryId === id) {
+    const replacement = project.scenes.find(
+      (s) => s.id !== id && !openingRole(s),
+    );
+    if (!replacement) throw Error("请先新建一张剧情卡片，作为起始剧情");
+    project.entryId = replacement.id;
+  }
+  if (openingRole(scene)) {
+    scene.openingByRole ||= {};
+    scene.openingByRole[scene.role] = clone(scene.opening);
+    scene.openingPurpose = scene.role;
+  }
+  if (openingRole({ role })) {
+    const existing = openingCard(project, role);
+    if (existing && existing.id !== id) {
+      existing.role = "story";
+      if (existing.savedRoutes) {
+        existing.next = clone(existing.savedRoutes.next);
+        delete existing.savedRoutes;
+      }
+      if (role === "splash") {
+        const loading = openingCard(project, "loading");
+        if (loading?.next?.sceneId === existing.id)
+          loading.next = sceneTarget(id);
+      }
+    }
+    scene.opening = clone(
+      scene.openingByRole?.[role] ||
+        (scene.openingPurpose === role ? scene.opening : null) ||
+        project[role],
+    );
+    scene.openingPurpose = role;
+    scene.opening.loop ??= true;
+    scene.savedRoutes ||= { next: clone(scene.next) };
+    scene.next = sceneTarget(
+      role === "loading"
+        ? openingCard(project, "splash")?.id || project.entryId
+        : project.entryId,
+    );
+  } else if (openingRole(scene) && scene.savedRoutes) {
+    scene.next = clone(scene.savedRoutes.next);
+    delete scene.savedRoutes;
+  }
+  scene.role = role;
+  if (openingRole(scene)) openingElements(scene);
+}
+export function setCardNext(project, id, target) {
+  const scene = project.scenes.find((s) => s.id === id),
+    destination = project.scenes.find((s) => s.id === target.sceneId);
+  if (!scene) throw Error("卡片不存在");
+  if (destination?.role === "loading") throw Error("加载卡片只用于作品启动");
+  if (openingRole(scene) && !["scene", "unlinked"].includes(target.kind))
+    throw Error("请选择后续卡片");
+  if (scene.role === "splash" && openingRole(destination))
+    throw Error("开屏请连接剧情卡片");
+  scene.next = clone(target);
+  if (scene.role === "splash" && target.kind === "scene")
+    project.entryId = target.sceneId;
+}
 export function references(p) {
   return [
     ...new Set(
       [
-        p.loading.image,
-        p.loading.video,
-        p.splash.video,
+        ...(!p.unifiedCards
+          ? [p.loading.image, p.loading.video, p.splash.video]
+          : []),
         ...p.scenes.flatMap((s) => [
           s.video?.assetId,
+          s.opening?.image,
           ...(s.clips || []).map((c) => c.assetId),
           ...(s.overlays || []).map((c) => c.assetId),
           ...s.images.map((f) => f.assetId),
@@ -162,14 +311,16 @@ export function targetsOf(s) {
 }
 export function reachable(p) {
   const seen = new Set(),
-    queue = [p.entryId];
+    queue = p.unifiedCards
+      ? [p.entryId, ...p.scenes.filter(openingRole).map((s) => s.id)]
+      : [p.entryId];
   while (queue.length) {
     const id = queue.shift();
     if (seen.has(id)) continue;
     seen.add(id);
     const s = p.scenes.find((s) => s.id === id);
     if (s)
-      for (const t of targetsOf(s))
+      for (const t of openingRole(s) ? [s.next] : targetsOf(s))
         if (t.kind === "scene") queue.push(t.sceneId);
   }
   return seen;
@@ -227,7 +378,7 @@ export function migrate(input) {
     );
     if (errors.length) throw Error(errors[0].message);
     if (old.schemaVersion === 2) spaceCards(p);
-    return p;
+    return unifyCards(p);
   }
   if (
     old.version !== 1 ||
@@ -375,7 +526,7 @@ export function migrate(input) {
   });
   spaceCards(p);
   p.migrationBackup = undefined;
-  return p;
+  return unifyCards(p);
 }
 // The same runtime validation is used by imports, drafts and the server.
 export function validate(p, { publish = false } = {}) {
@@ -432,7 +583,7 @@ export function validate(p, { publish = false } = {}) {
       !s ||
       !id(s.id) ||
       !str(s.name) ||
-      !["story", "death", "ending"].includes(s.role) ||
+      !["story", "death", "ending", "loading", "splash"].includes(s.role) ||
       !["video", "images", "sequence"].includes(s.source) ||
       (s.source === "sequence" && !Array.isArray(s.clips)) ||
       !Array.isArray(s.images) ||
@@ -449,6 +600,11 @@ export function validate(p, { publish = false } = {}) {
     ids.add(s.id);
   }
   if (!ids.has(p.entryId)) error("请选择作品的开始段落");
+  if (openingRole(p.scenes.find((s) => s.id === p.entryId)))
+    error("起始剧情不能是加载或开屏卡片");
+  for (const role of ["loading", "splash"])
+    if (p.scenes.filter((s) => s.role === role).length > 1)
+      error("加载和开屏各最多一张卡片");
   for (const [key, value] of Object.entries(p.variables))
     if (
       !id(key) ||
@@ -557,9 +713,73 @@ export function validate(p, { publish = false } = {}) {
         error("开场元素位置或样式无效");
     }
   }
-  if (p.loading.image) ref(p.loading.image, null, "image");
-  if (p.loading.video) ref(p.loading.video, null, "video");
-  if (p.splash.video) ref(p.splash.video, null, "video");
+  for (const scene of p.scenes.filter(openingRole)) {
+    const c = scene.opening;
+    if (
+      !c ||
+      !str(c.title) ||
+      !str(c.subtitle) ||
+      (c.loop !== undefined && typeof c.loop !== "boolean")
+    ) {
+      error("开场卡片设置无效", scene.id, "structure");
+      continue;
+    }
+    if (
+      scene.role === "loading" &&
+      (!str(c.text) ||
+        !/^#[a-f0-9]{6}$/i.test(c.color) ||
+        !integer(c.minimumMs) ||
+        c.minimumMs > 30000)
+    )
+      error("加载卡片设置无效", scene.id);
+    if (c.startText !== undefined && !str(c.startText))
+      error("开始按钮文字无效", scene.id);
+    if (c.effect !== undefined && !["fade", "zoom", "none"].includes(c.effect))
+      error("开场动效无效", scene.id);
+    for (const [key, style] of Object.entries(c.layout || {}))
+      if (
+        !["title", "subtitle", "progress", "start"].includes(key) ||
+        !style ||
+        !finite(style.x, 0, 100) ||
+        !finite(style.y, 0, 100) ||
+        !finite(style.size, 1, 300) ||
+        !finite(style.width, 0, 100) ||
+        !/^#[a-f0-9]{6}$/i.test(style.color)
+      )
+        error("开场元素位置或样式无效", scene.id);
+    for (const [key, range] of Object.entries(c.elements || {}))
+      if (
+        !["title", "subtitle", "progress", "start"].includes(key) ||
+        !range ||
+        !integer(range.startMs) ||
+        !integer(range.endMs) ||
+        range.endMs <= range.startMs ||
+        range.endMs > 7200000 ||
+        typeof range.hidden !== "boolean"
+      )
+        error("开场元素时间无效", scene.id);
+    if (c.image) ref(c.image, scene.id, "image");
+    if (
+      scene.role === "splash" &&
+      (c.elements?.start?.hidden ||
+        c.elements?.start?.startMs >= duration(scene))
+    )
+      (publish ? error : warn)(
+        "开屏需要可点击的开始按钮，请检查显示时间和隐藏设置",
+        scene.id,
+      );
+    const destination = p.scenes.find((s) => s.id === scene.next?.sceneId);
+    if (
+      destination?.role === "loading" ||
+      (scene.role === "splash" && openingRole(destination))
+    )
+      error("开场卡片连接无效", scene.id);
+  }
+  if (!p.unifiedCards) {
+    if (p.loading.image) ref(p.loading.image, null, "image");
+    if (p.loading.video) ref(p.loading.video, null, "video");
+    if (p.splash.video) ref(p.splash.video, null, "video");
+  }
   for (const s of p.scenes) {
     if (s.source === "sequence") {
       const clips = [...s.clips].sort(
@@ -721,10 +941,10 @@ export function validate(p, { publish = false } = {}) {
       if (
         !["choice", "qte", "hotspot"].includes(e.kind) ||
         !integer(e.startMs) ||
-        e.startMs > d ||
+        (!openingRole(s) && e.startMs > d) ||
         !integer(e.endMs) ||
         e.endMs < e.startMs ||
-        e.endMs > d ||
+        (!openingRole(s) && e.endMs > d) ||
         !["range", "clock", "wait"].includes(e.endMode) ||
         !integer(e.timeoutMs) ||
         e.timeoutMs < 100 ||

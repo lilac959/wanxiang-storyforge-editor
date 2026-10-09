@@ -40,6 +40,12 @@ import {
   newProject,
   newScene,
   newEvent,
+  unifyCards,
+  openingRole,
+  openingCard,
+  openingElements,
+  changeRole,
+  setCardNext,
   migrate,
   validate,
   duration,
@@ -48,7 +54,7 @@ import {
   gestures,
   endTarget,
 } from "./model.mjs";
-import { AssetStore } from "./assets.mjs";
+import { AssetStore, resolveOpeningMedia } from "./assets.mjs";
 import {
   Storage,
   esc,
@@ -79,6 +85,7 @@ let storage = new Storage(assets, status),
   openingSession,
   assetSearch = "",
   pendingDelete = [],
+  pendingRole = null,
   newCardContext = null,
   connectionEdit = null,
   time = 0,
@@ -216,6 +223,8 @@ const seconds = (label, path, value) =>
 function selectObject(project = p()) {
   const scene =
     project.scenes.find((x) => x.id === selected) || project.scenes[0];
+  if (selection.kind === "opening")
+    return scene.opening?.elements?.[selection.id];
   if (selection.kind === "clip")
     return (
       scene.clips?.find((x) => x.id === selection.id) ||
@@ -240,6 +249,26 @@ function selectObject(project = p()) {
                 : scene;
 }
 function targetFields(label, path, t) {
+  if (path === "next" && openingRole(s()))
+    return (
+      `<h3>${s().role === "loading" ? "加载完成后" : "点击开始后"}</h3>` +
+      field("后续动作", "next.kind", t.kind, {
+        options: { scene: "进入另一张卡片", unlinked: "待连接" },
+      }) +
+      (t.kind === "scene"
+        ? field("目标卡片", "next.sceneId", t.sceneId, {
+            options: Object.fromEntries(
+              p()
+                .scenes.filter(
+                  (x) =>
+                    x.role !== "loading" &&
+                    (s().role !== "splash" || !openingRole(x)),
+                )
+                .map((x) => [x.id, x.name]),
+            ),
+          })
+        : "")
+    );
   return `<h3>${label}</h3>${field("后续动作", path + ".kind", t.kind, { options: { continue: "继续当前视频", scene: "进入另一剧情段落", seek: "跳到当前视频位置", end: "结束作品", unlinked: "待连接", home: "返回开屏" } })}${t.kind === "scene" ? field("目标段落", path + ".sceneId", t.sceneId, { options: Object.fromEntries(p().scenes.map((x) => [x.id, x.name])) }) : t.kind === "seek" ? seconds("跳转到（秒）", path + ".timeMs", t.timeMs) : ""}`;
 }
 function conditionFields(path, c) {
@@ -274,7 +303,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">搜索</button><button class="primary" data-action="new-card">＋ 新建场景</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加图片</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="搜索场景 / 场景目录">搜索</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
@@ -402,6 +431,9 @@ function render() {
   $('[data-action="graph-view"]').hidden = page === "story" && graph;
   $('[data-action="canvas-view"]').hidden = page !== "story" || !graph;
   $(".story-work").hidden = page !== "story" || graph;
+  for (const action of ["add-qte", "add-choice", "add-hotspot"])
+    $(`[data-action="${action}"]`).hidden =
+      page === "story" && openingRole(s());
   $(".graph-scroll").hidden = page !== "story" || !graph;
   $(".settings-page").hidden = page === "story" || isOpening;
   $('[data-action="preview-current"]').textContent =
@@ -500,6 +532,26 @@ function items() {
                   ? `${x.value} 倍速`
                   : "电影黑边",
       });
+  if (openingRole(scene))
+    for (const [id, range] of Object.entries(scene.opening.elements || {}))
+      if (
+        (scene.role === "loading"
+          ? ["title", "subtitle", "progress"]
+          : ["title", "subtitle", "start"]
+        ).includes(id)
+      )
+        list.push({
+          id,
+          kind: "opening",
+          start: range.startMs,
+          end: range.endMs,
+          label: {
+            title: "标题",
+            subtitle: "副标题",
+            progress: "加载进度",
+            start: "开始按钮",
+          }[id],
+        });
   return list;
 }
 function renderTimeline() {
@@ -508,6 +560,21 @@ function renderTimeline() {
   const groups = [
     ["画面", ["video", "image", "clip"]],
     ["互动", ["event"]],
+    ...(openingRole(s())
+      ? (s().role === "loading"
+          ? ["title", "subtitle", "progress"]
+          : ["title", "subtitle", "start"]
+        ).map((key) => [
+          {
+            title: "标题",
+            subtitle: "副标题",
+            progress: "加载进度",
+            start: "开始按钮",
+          }[key],
+          ["opening"],
+          key,
+        ])
+      : []),
     ["字幕", ["subtitle"]],
     ["叠加", ["overlay"]],
     ["音频", ["audio"]],
@@ -526,7 +593,10 @@ function renderTimeline() {
             (x) =>
               kinds.includes(x.kind) &&
               (!effectKind ||
-                s().effects.find((e) => e.id === x.id)?.kind === effectKind),
+                (kinds.includes("opening")
+                  ? x.id === effectKind
+                  : s().effects.find((e) => e.id === x.id)?.kind ===
+                    effectKind)),
           ),
       )
       .map(
@@ -536,7 +606,10 @@ function renderTimeline() {
               (x) =>
                 kinds.includes(x.kind) &&
                 (!effectKind ||
-                  s().effects.find((e) => e.id === x.id)?.kind === effectKind),
+                  (kinds.includes("opening")
+                    ? x.id === effectKind
+                    : s().effects.find((e) => e.id === x.id)?.kind ===
+                      effectKind)),
             )
             .map(
               (x) =>
@@ -570,6 +643,10 @@ function renderInspector() {
   }
   if (page === "loading" || page === "splash") {
     renderOpeningInspector();
+    return;
+  }
+  if (page === "story" && selection.kind === "opening") {
+    renderOpeningElementInspector();
     return;
   }
   let html = "<h2>属性设置</h2>",
@@ -609,7 +686,13 @@ function renderInspector() {
       field("段落名称", "name", scene.name) +
       field("剧情提示", "subtitle", scene.subtitle, { type: "textarea" }) +
       field("段落用途", "role", scene.role, {
-        options: { story: "剧情", death: "死亡 / 失败", ending: "结局" },
+        options: {
+          story: "剧情",
+          loading: "加载",
+          splash: "开屏",
+          death: "失败",
+          ending: "结局",
+        },
       }) +
       field("纯画面呈现", "clean", scene.clean, { type: "checkbox" }) +
       field("灰度画面", "grayscale", scene.grayscale, { type: "checkbox" }) +
@@ -794,9 +877,17 @@ function renderInspector() {
       "<h2>场景</h2>" +
       field("名称", "name", scene.name) +
       field("用途", "role", scene.role, {
-        options: { story: "剧情", ending: "结局", death: "失败" },
+        options: {
+          story: "剧情",
+          loading: "加载",
+          splash: "开屏",
+          ending: "结局",
+          death: "失败",
+        },
       }) +
-      '<div class="mini-actions"><button data-action="set-entry">设为起始剧情</button></div>' +
+      (openingRole(scene)
+        ? ""
+        : '<div class="mini-actions"><button data-action="set-entry">设为起始剧情</button></div>') +
       "<h3>出口</h3>" +
       ports(scene)
         .map(
@@ -819,16 +910,17 @@ function renderInspector() {
             ) +
             "</button>",
         )
-        .join("") +
-      '<div class="mini-actions"><button data-action="copy-scenes">复制</button><button class="danger" data-action="delete-scenes">删除</button></div>';
+        .join("");
   if (page === "story" && graph && critical.length)
     html += `<div class="issues">${critical.map((x) => `<p>${esc(x.message)}</p>`).join("")}</div>`;
+  if (page === "story" && selection.kind === "scene" && openingRole(scene))
+    html += openingSettings(scene);
   $(".inspector").innerHTML = html;
   if (page === "story" && !graph && selection.kind === "scene") {
     const host = $(".inspector"),
       disclosure = document.createElement("details");
     disclosure.innerHTML = "<summary>场景显示设置</summary>";
-    for (const path of ["subtitle", "role", "clean", "grayscale", "pending"]) {
+    for (const path of ["subtitle", "clean", "grayscale", "pending"]) {
       const field = host
         .querySelector(`[data-field="${path}"]`)
         ?.closest(".field");
@@ -838,6 +930,90 @@ function renderInspector() {
     const source = host.querySelector('[data-field="source"]');
     if (source?.options.length === 1) source.closest(".field").remove();
   }
+}
+function openingSettings(scene) {
+  const c = scene.opening,
+    scope = "scene";
+  return (
+    "<h3>开场设置</h3>" +
+    field("循环背景", "opening.loop", !!c.loop, { scope, type: "checkbox" }) +
+    (scene.role === "loading"
+      ? field("最少展示（秒）", "opening.minimumMs", c.minimumMs || 0, {
+          scope,
+          type: "number",
+          millis: true,
+          min: 0,
+          max: 30,
+          step: 0.1,
+        })
+      : field("文字入场", "opening.effect", c.effect || "none", {
+          scope,
+          options: { none: "直接显示", fade: "淡入", zoom: "缓慢放大" },
+        })) +
+    "<details><summary>标题与按钮</summary>" +
+    field("标题", "opening.title", c.title || "", { scope }) +
+    field("副标题", "opening.subtitle", c.subtitle || "", { scope }) +
+    (scene.role === "loading"
+      ? field("加载提示", "opening.text", c.text || "", { scope }) +
+        field("进度颜色", "opening.color", c.color || "#e5d6b1", {
+          scope,
+          type: "color",
+        }) +
+        field("标题排布", "opening.titleLayout", c.titleLayout || "normal", {
+          scope,
+          options: { square: "方形", normal: "单行" },
+        })
+      : field(
+          "开始按钮文字",
+          "opening.startText",
+          c.startText ?? "点击或按任意键开始",
+          { scope },
+        )) +
+    "</details>"
+  );
+}
+function renderOpeningElementInspector() {
+  const key = selection.id,
+    c = s().opening,
+    range = selectObject(),
+    label = {
+      title: "标题",
+      subtitle: "副标题",
+      progress: "加载进度",
+      start: "开始按钮",
+    }[key],
+    property = {
+      title: "title",
+      subtitle: "subtitle",
+      progress: "text",
+      start: "startText",
+    }[key];
+  let html =
+    `<h2>${label}</h2>` +
+    field("文字", "opening." + property, c[property] ?? "", {
+      scope: "scene",
+    }) +
+    seconds("出现时间（秒）", "startMs", range.startMs) +
+    seconds("结束时间（秒）", "endMs", range.endMs) +
+    field("隐藏", "hidden", range.hidden, { type: "checkbox" });
+  const style = c.layout?.[key] || openingDefaults(key);
+  for (const [name, label, min, max] of [
+    ["x", "横向位置 %", 0, 100],
+    ["y", "纵向位置 %", 0, 100],
+    ["size", "字号", 1, 300],
+    ["width", "宽度 %", 1, 100],
+  ])
+    html += field(label, `opening.layout.${key}.${name}`, style[name], {
+      scope: "scene",
+      type: "number",
+      min,
+      max,
+    });
+  html += field("文字颜色", `opening.layout.${key}.color`, style.color, {
+    scope: "scene",
+    type: "color",
+  });
+  $(".inspector").innerHTML = html;
 }
 function renderSettings() {
   const box = $(".settings-page");
@@ -911,6 +1087,14 @@ function renderSettings() {
     `<button data-action="upload-opening">＋ 上传 / 替换背景素材</button><p class="muted">${page === "loading" ? "" : "视频循环播放，玩家点击或按键后进入明确的开始段落。"}</p>`;
 }
 function ports(scene) {
+  if (openingRole(scene))
+    return [
+      {
+        path: "next",
+        label: scene.role === "loading" ? "加载完成" : "点击开始",
+        target: scene.next,
+      },
+    ];
   const list = [{ path: "next", label: "播放结束", target: scene.next }];
   scene.events.forEach((e, i) => {
     if (e.kind === "choice")
@@ -988,6 +1172,8 @@ async function adopt(project, revision = "none", backup = true) {
   storage.queue.stopped = true;
   if (storage.queue.running) await storage.queue.running;
   if (history && backup) storage.backup(p(), "切换作品前");
+  project = unifyCards(project);
+  await resolveOpeningMedia(project, assets).catch((e) => notify(e.message));
   history = new History(project, changed);
   selected = project.entryId;
   selection = { kind: "scene" };
@@ -1043,6 +1229,8 @@ async function boot() {
       revision = draft.revision;
     } catch {}
   }
+  project = unifyCards(project);
+  await resolveOpeningMedia(project, assets).catch((e) => notify(e.message));
   history = new History(project, changed);
   selected = project.entryId;
   shell();
@@ -1360,7 +1548,12 @@ async function handleAction(action, button) {
       break;
     }
     case "set-entry":
-      mutate("设置入口", (p) => (p.entryId = selected));
+      if (openingRole(s())) throw Error("请选择普通剧情卡片作为起始剧情");
+      mutate("设置入口", (p) => {
+        p.entryId = selected;
+        const splash = openingCard(p, "splash");
+        if (splash) splash.next = { kind: "scene", sceneId: selected };
+      });
       break;
     case "delete-scene": {
       await workspaceAction("delete-scenes", button);
@@ -1456,6 +1649,12 @@ async function handleAction(action, button) {
       break;
     }
     case "delete-item": {
+      if (selection.kind === "opening") {
+        mutate("隐藏开场元素", () => {
+          selectObject().hidden = true;
+        });
+        break;
+      }
       if (["clip", "video", "image"].includes(selection.kind)) {
         showClipDelete();
         break;
@@ -1545,6 +1744,8 @@ async function handleAction(action, button) {
       await previewAsset(button.dataset.id, "ui");
       break;
     case "use-ui": {
+      if (openingRole(s()))
+        throw Error("加载和开屏不使用剧情互动，请编辑开场元素");
       const event = componentEvent(
         button.dataset.id,
         Math.min(time, Math.max(0, duration(s()) - 100)),
@@ -2214,6 +2415,63 @@ function timelineKey(e) {
   });
 }
 function canvasPointer(e) {
+  const openingEl = e.target.closest("[data-opening-element]");
+  if (openingEl && openingRole(s()) && e.button === 0) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = openingEl.dataset.openingElement,
+      bounds = openingEl.closest(".opening-frame").getBoundingClientRect(),
+      before = clone(s().opening.layout?.[key] || openingDefaults(key)),
+      x = e.clientX,
+      y = e.clientY;
+    selection = { kind: "opening", id: key };
+    renderInspector();
+    const controller = new AbortController();
+    let dx = 0,
+      dy = 0;
+    window.addEventListener(
+      "pointermove",
+      (ev) => {
+        dx = ((ev.clientX - x) / bounds.width) * 100;
+        dy = ((ev.clientY - y) / bounds.height) * 100;
+        Object.assign(openingEl.style, {
+          position: "absolute",
+          left: clamp(before.x + dx, 0, 100) + "%",
+          top: clamp(before.y + dy, 0, 100) + "%",
+          bottom: "auto",
+          right: "auto",
+          transform: "translate(-50%,-50%)",
+          translate: "none",
+          margin: "0",
+        });
+      },
+      { signal: controller.signal },
+    );
+    const finish = (ev) => {
+      controller.abort();
+      if (ev.type !== "pointercancel" && Math.abs(dx) + Math.abs(dy) > 0.1) {
+        suppressClick = true;
+        mutate("移动开场元素", () => {
+          s().opening.layout ||= {};
+          s().opening.layout[key] = {
+            ...before,
+            x: +clamp(before.x + dx, 0, 100).toFixed(1),
+            y: +clamp(before.y + dy, 0, 100).toFixed(1),
+          };
+        });
+      }
+      paintStill();
+    };
+    window.addEventListener("pointerup", finish, {
+      once: true,
+      signal: controller.signal,
+    });
+    window.addEventListener("pointercancel", finish, {
+      once: true,
+      signal: controller.signal,
+    });
+    return;
+  }
   const el = e.target.closest("[data-edit-event],[data-edit-item]");
   if (!el || e.button !== 0) return;
   e.preventDefault();
@@ -2364,6 +2622,7 @@ document.addEventListener("change", (e) => {
           ? p().splash
           : selectObject();
   if (!obj) return;
+  if (scope === "scene") obj = s();
   let value =
     el.type === "checkbox"
       ? el.checked
@@ -2378,7 +2637,27 @@ document.addEventListener("change", (e) => {
     return;
   }
   try {
+    if (path === "role" && value !== obj.role) {
+      const other = openingCard(p(), value);
+      if (
+        openingRole({ role: value }) &&
+        ((other && other.id !== selected) ||
+          s().events.length ||
+          selected === p().entryId)
+      ) {
+        pendingRole = { id: selected, role: value };
+        panel(
+          `<h2>改为${value === "loading" ? "加载" : "开屏"}卡片？</h2><p>${other && other.id !== selected ? `原${value === "loading" ? "加载" : "开屏"}卡片“${esc(other.name)}”将改为剧情，内容保留。` : ""}${s().events.length ? "已有互动和分支暂时停用，改回剧情后可恢复。" : ""}${selected === p().entryId ? "起始剧情将改为另一张剧情卡片。" : ""}</p><button data-action="confirm-role">确认修改</button><button data-action="close-panel">取消</button>`,
+        );
+      } else mutate("修改卡片用途", (p) => changeRole(p, selected, value));
+      return;
+    }
     mutate("修改属性", () => {
+      if (scope === "scene" && path.startsWith("opening.layout.")) {
+        const key = path.split(".")[2];
+        s().opening.layout ||= {};
+        s().opening.layout[key] ||= openingDefaults(key);
+      }
       if (selection.kind === "clip" && path === "startMs") {
         moveClip(s(), obj.id, value);
         return;
@@ -2391,6 +2670,12 @@ document.addEventListener("change", (e) => {
         obj.layout[openingPart] ||= openingDefaults(openingPart);
       }
       set(obj, path, value);
+      if (
+        selection.kind === "scene" &&
+        path === "next.sceneId" &&
+        openingRole(obj)
+      )
+        setCardNext(p(), selected, obj.next);
       if (path.endsWith(".target.kind") || path === "next.kind") {
         const base = path.slice(0, -5);
         set(
@@ -2495,7 +2780,13 @@ $("#importFile").onchange = async (e) => {
     busy = false;
   }
 };
-$("#panel").addEventListener("close", clearAssetPreview);
+$("#panel").addEventListener("close", () => {
+  clearAssetPreview();
+  if (pendingRole) {
+    pendingRole = null;
+    render();
+  }
+});
 $(".panel-close").onclick = closePanel;
 $(".preview-close").onclick = () => {
   $("#preview").close();
@@ -2551,7 +2842,17 @@ function setupBoard() {
     mini: () => $(".minimap"),
     zoom: (n) => ($("#graph-scale").textContent = Math.round(n * 100) + "%"),
     selection: (n) => {
-      $(".selection-tools").hidden = !n;
+      $(".selection-tools").hidden = n < 2;
+      const tools = $(".selection-tools");
+      if (n >= 2) {
+        board.surface.append(tools);
+        const positions = [...board.selected]
+          .map((id) => board.positions[id])
+          .filter(Boolean);
+        tools.style.left = Math.min(...positions.map((p) => p.x)) + "px";
+        tools.style.top =
+          Math.max(8, Math.min(...positions.map((p) => p.y)) - 44) + "px";
+      }
       $('[data-action="arrange-selection"]').hidden = n < 2;
     },
     preview: () => preview(),
@@ -2709,6 +3010,10 @@ function setupBoard() {
     clearDrop();
     const aid = e.dataTransfer.getData("application/storyforge-asset"),
       ui = e.dataTransfer.getData("application/storyforge-ui");
+    if (ui && openingRole(s())) {
+      notify("加载和开屏不使用剧情互动，请编辑开场元素");
+      return;
+    }
     try {
       if (aid || ui) {
         mutate("拖入时间轴", () => {
@@ -2833,8 +3138,12 @@ function showConnection(id, path) {
     t = get(scene, path),
     port = ports(scene).find((x) => x.path === path);
   panel(
-    `<h2>${esc(port?.label || "剧情连接")}</h2><label class="field">下一场景<select id="connection-target"><option value="unlinked">待连接</option><option value="end">结束作品</option><option value="continue">继续播放</option><option value="home">返回开屏</option>${p()
-      .scenes.map(
+    `<h2>${esc(port?.label || "剧情连接")}</h2><label class="field">下一卡片<select id="connection-target"><option value="unlinked">待连接</option>${openingRole(scene) ? "" : '<option value="end">结束作品</option><option value="continue">继续播放</option><option value="home">返回开屏</option>'}${p()
+      .scenes.filter(
+        (x) =>
+          x.role !== "loading" && (scene.role !== "splash" || !openingRole(x)),
+      )
+      .map(
         (x) =>
           `<option value="${x.id}" ${t.sceneId === x.id ? "selected" : ""}>${esc(x.name)}</option>`,
       )
@@ -2999,10 +3308,19 @@ async function managedProject(id) {
 async function workspaceAction(action, button = { dataset: {} }) {
   const ids = () => {
     const list = [...board.selected].filter((id) => !specialNode(id));
-    if (!list.length) throw Error("请选择普通剧情场景；加载和开屏各保留一个");
+    if (!list.length) throw Error("请选择卡片");
     return list;
   };
   switch (action) {
+    case "close-panel":
+      closePanel();
+      break;
+    case "confirm-role":
+      mutate("修改卡片用途", (p) =>
+        changeRole(p, pendingRole.id, pendingRole.role),
+      );
+      closePanel();
+      break;
     case "archive-cloud":
       await response(
         await fetch("/api/v2/archive", {
@@ -3191,7 +3509,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "make-ending":
       mutate("设为结局", () => {
-        s().role = "ending";
+        changeRole(p(), selected, "ending");
         s().next = endTarget();
       });
       closePanel();
@@ -3208,7 +3526,8 @@ async function workspaceAction(action, button = { dataset: {} }) {
     case "delete-scenes": {
       pendingDelete = ids();
       const keep = p().scenes.filter((s) => !pendingDelete.includes(s.id));
-      if (!keep.length) throw Error("至少保留一个场景");
+      if (!keep.some((s) => !openingRole(s)))
+        throw Error("至少保留一张剧情卡片");
       const inbound = p().scenes.filter(
         (s) =>
           !pendingDelete.includes(s.id) &&
@@ -3217,7 +3536,14 @@ async function workspaceAction(action, button = { dataset: {} }) {
           ),
       );
       panel(
-        `<h2>删除 ${pendingDelete.length} 个场景？</h2><p>${inbound.length ? "关联场景：" + inbound.map((x) => esc(x.name)).join("、") + "。相关出口将标记为待连接。" : "删除后可以撤销，素材仍保留。"}</p>${pendingDelete.includes(p().entryId) ? `<label class="field">新的故事入口<select id="new-entry">${keep.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></label>` : ""}<button class="danger" data-action="confirm-delete-scenes">删除场景</button>`,
+        `<h2>删除 ${pendingDelete.length} 张卡片？</h2><p>${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "loading") ? "删除加载卡片后，使用默认资源准备提示。" : ""}${pendingDelete.some((id) => p().scenes.find((s) => s.id === id)?.role === "splash") ? "删除开屏后，启动流程直接进入起始剧情。" : ""}${inbound.length ? "关联卡片：" + inbound.map((x) => esc(x.name)).join("、") + "。剧情出口将标记为待连接，开场连接会调整到起始剧情。" : "删除后可以撤销，素材仍保留。"}</p>${
+          pendingDelete.includes(p().entryId)
+            ? `<label class="field">新的故事入口<select id="new-entry">${keep
+                .filter((s) => !openingRole(s))
+                .map((s) => `<option value="${s.id}">${esc(s.name)}</option>`)
+                .join("")}</select></label>`
+            : ""
+        }<button class="danger" data-action="confirm-delete-scenes">删除场景</button>`,
       );
       break;
     }
@@ -3232,15 +3558,19 @@ async function workspaceAction(action, button = { dataset: {} }) {
     }
     case "save-connection": {
       const value = $("#connection-target").value;
-      mutate("修改连接", (p) =>
-        set(
-          p.scenes.find((x) => x.id === connectionEdit.id),
-          connectionEdit.path,
-          ["unlinked", "end", "continue", "home"].includes(value)
-            ? { kind: value }
-            : { kind: "scene", sceneId: value },
-        ),
-      );
+      mutate("修改连接", (p) => {
+        const target = ["unlinked", "end", "continue", "home"].includes(value)
+          ? { kind: value }
+          : { kind: "scene", sceneId: value };
+        if (connectionEdit.path === "next")
+          setCardNext(p, connectionEdit.id, target);
+        else
+          set(
+            p.scenes.find((x) => x.id === connectionEdit.id),
+            connectionEdit.path,
+            target,
+          );
+      });
       board.pending = null;
       closePanel();
       break;
@@ -3324,7 +3654,11 @@ async function workspaceAction(action, button = { dataset: {} }) {
       );
       if (board.scale < 0.65) board.zoom(0.75 / board.scale);
       board.locate(
-        action === "arrange-selection" ? [...board.selected][0] : LOADING,
+        action === "arrange-selection"
+          ? [...board.selected][0]
+          : openingCard(p(), "loading")?.id ||
+              openingCard(p(), "splash")?.id ||
+              p().entryId,
       );
       break;
     }
@@ -3552,9 +3886,11 @@ function renderOpeningInspector() {
   $(".inspector").innerHTML = html;
 }
 function openingDefaults(kind) {
-  const el = $('.opening-preview [data-opening-element="' + kind + '"]'),
-    frame = $(".opening-preview .opening-frame");
-  if (el && frame) {
+  const el =
+      $('.canvas [data-opening-element="' + kind + '"]') ||
+      $('.opening-preview [data-opening-element="' + kind + '"]'),
+    frame = el?.closest(".opening-frame");
+  if (el && frame && !el.hidden && el.getBoundingClientRect().width > 0) {
     const a = el.getBoundingClientRect(),
       b = frame.getBoundingClientRect();
     return {
@@ -3568,10 +3904,10 @@ function openingDefaults(kind) {
     };
   }
   return {
-    x: 50,
-    y: kind === "progress" || kind === "start" ? 82 : 40,
-    size: kind === "title" ? 90 : 32,
-    width: kind === "progress" ? 30 : 70,
+    x: kind === "progress" ? 17.75 : 50,
+    y: kind === "progress" || kind === "start" ? 86 : 40,
+    size: kind === "title" ? 90 : 35,
+    width: kind === "progress" ? 23.5 : 70,
     color: "#e5d6b1",
   };
 }
@@ -3646,6 +3982,16 @@ function openGraphNode(id) {
 }
 function connectFlow(project, id, path, target) {
   if (id === LOADING) throw Error("加载完成后固定进入开屏");
+  const sourceNode = project.scenes.find((s) => s.id === id),
+    targetNode = project.scenes.find((s) => s.id === target);
+  if (targetNode?.role === "loading") throw Error("加载卡片只用于作品启动");
+  if (sourceNode?.role === "splash" && openingRole(targetNode))
+    throw Error("开屏请连接剧情卡片");
+  if (
+    sourceNode?.role === "loading" &&
+    !["splash", "story"].includes(targetNode?.role)
+  )
+    throw Error("加载请连接开屏或剧情卡片");
   if (target === LOADING) throw Error("加载节点只用于作品入口");
   if (id === SPLASH) {
     if (specialNode(target)) throw Error("开屏需要连接普通剧情");
@@ -3656,6 +4002,10 @@ function connectFlow(project, id, path, target) {
   if (!scene) throw Error("源场景不存在");
   if (!specialNode(target) && !project.scenes.some((s) => s.id === target))
     throw Error("目标场景不存在");
+  if (path === "next") {
+    setCardNext(project, id, { kind: "scene", sceneId: target });
+    return;
+  }
   set(
     scene,
     path,

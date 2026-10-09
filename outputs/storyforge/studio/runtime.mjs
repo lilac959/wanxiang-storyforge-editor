@@ -1,4 +1,11 @@
-import { clone, duration, evaluate, applyActions, clamp } from "./model.mjs";
+import {
+  clone,
+  duration,
+  evaluate,
+  applyActions,
+  clamp,
+  openingRole,
+} from "./model.mjs";
 
 // No DOM, media elements or editor selection state. A view supplies media time.
 export class Runtime {
@@ -114,7 +121,7 @@ export class Runtime {
         this.resolve(false);
     }
     if (token !== this.generation) return;
-    if (!this.active) {
+    if (!this.active && !openingRole(this.scene)) {
       const events = [...this.scene.events].sort(
         (a, b) => a.startMs - b.startMs,
       );
@@ -130,6 +137,14 @@ export class Runtime {
       }
     }
     if (!this.active && this.timeMs >= d) {
+      if (openingRole(this.scene)) {
+        if (this.scene.opening?.loop) this.enter(this.scene.id);
+        else {
+          this.pause();
+          this.emit("tick");
+        }
+        return;
+      }
       const target = this.pending || this.scene.next;
       this.pending = null;
       this.follow(target);

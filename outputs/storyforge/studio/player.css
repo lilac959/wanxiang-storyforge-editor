@@ -381,6 +381,16 @@ button:disabled {
   overflow: hidden;
   background: #080e11;
 }
+.opening.unified-opening {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  z-index: 7;
+}
+.unified-opening [data-opening-element] {
+  pointer-events: auto;
+}
 .opening video,
 .opening img {
   position: absolute;

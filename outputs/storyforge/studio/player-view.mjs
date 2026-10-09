@@ -1,6 +1,6 @@
 import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
-import { duration, clamp, gestures } from "./model.mjs";
+import { duration, clamp, gestures, openingRole } from "./model.mjs";
 import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 
@@ -257,7 +257,9 @@ export class PlayerView {
     this.runtime = new Runtime(project, (event, runtime) =>
       this.update(event, runtime),
     );
-    await qteAudio.unlock();
+    // Browsers may keep audio activation pending until a real user gesture.
+    // Video and opening UI must render without waiting for that permission.
+    qteAudio.unlock();
     this.runtime.start(sceneId, time);
     this.showSettingsButton();
   }
@@ -294,6 +296,7 @@ export class PlayerView {
     qteAudio.stop();
   }
   dispose() {
+    this.openingObserver?.disconnect();
     this.stop();
     this.disposed = true;
     clearTimeout(this.settingsTimer);
@@ -350,12 +353,13 @@ export class PlayerView {
     }
     this.paintScene(scene, time);
     const event =
-      scene.events.find((e) => e.id === focusEvent) ||
-      scene.events.find(
-        (e) =>
-          time >= e.startMs &&
-          (time <= e.endMs || e.startMs === duration(scene)),
-      );
+      !openingRole(scene) &&
+      (scene.events.find((e) => e.id === focusEvent) ||
+        scene.events.find(
+          (e) =>
+            time >= e.startMs &&
+            (time <= e.endMs || e.startMs === duration(scene)),
+        ));
     this.paintEvent(event);
   }
   async mount(scene, time = 0) {
@@ -377,7 +381,15 @@ export class PlayerView {
         const v = document.createElement("video");
         v.playsInline = true;
         v.preload = "auto";
-        v.muted = this.muted;
+        v.muted = this.muted || scene.role === "loading";
+        if (
+          scene.role === "loading" &&
+          scene.opening?.image &&
+          this.project.assets[scene.opening.image]
+        )
+          v.poster = await this.assets.url(
+            this.project.assets[scene.opening.image],
+          );
         this.video = v;
         this.visual.append(v);
         const url = await this.assets.url(this.project.assets[current.assetId]);
@@ -594,7 +606,13 @@ export class PlayerView {
       } else if (this.video.paused && !this.playAttempt) {
         this.playAttempt = true;
         try {
-          await this.video.play();
+          try {
+            await this.video.play();
+          } catch (error) {
+            if (!openingRole(r.scene)) throw error;
+            this.video.muted = true;
+            await this.video.play();
+          }
         } catch {
           if (this.runtime === r) {
             r.pause();
@@ -631,7 +649,93 @@ export class PlayerView {
       if (a.paused) a.play().catch(() => {});
     }
   }
+  paintOpening(scene, time) {
+    if (!openingRole(scene)) {
+      this.openingLayer?.remove();
+      this.openingLayer = null;
+      this.openingObserver?.disconnect();
+      return;
+    }
+    const c = scene.opening || {},
+      signature = JSON.stringify([scene.id, c, scene.role]);
+    if (!this.openingLayer || this.openingSignature !== signature) {
+      this.openingLayer?.remove();
+      const layer = document.createElement("div");
+      layer.className = `opening unified-opening ${scene.role === "loading" ? "loading-opening" : c.effect || "none"} ${c.titleLayout === "square" ? "square" : ""}`;
+      layer.style.setProperty("--loading-color", c.color || "#e5d6b1");
+      const title =
+        scene.role === "loading" && c.titleLayout === "square"
+          ? Array.from(c.title || "")
+              .map((char) => `<span>${esc(char)}</span>`)
+              .join("")
+          : esc(c.title || "");
+      layer.innerHTML = `<div class="opening-frame"><div class="opening-content"><h1 data-opening-element="title">${title}</h1><p data-opening-element="subtitle">${esc(c.subtitle || "")}</p></div>${scene.role === "loading" ? `<div class="load-progress" data-opening-element="progress"><span>${esc(c.text || "正在准备资源")}</span><progress max="100" value="${this.editing ? 45 : 0}"></progress><small hidden></small></div>` : `<button class="opening-start" data-opening-element="start">${esc(c.startText ?? "点击或按任意键开始")}</button>`}</div>`;
+      this.stage.append(layer);
+      this.openingLayer = layer;
+      this.openingSignature = signature;
+      layer.querySelector("button")?.addEventListener("click", () => {
+        if (this.editing) this.onSelect("start", "opening");
+        else if (this.runtime?.scene.id === scene.id) {
+          qteAudio.unlock();
+          this.runtime.follow(scene.next);
+        }
+      });
+      if (this.editing)
+        layer.addEventListener("click", (e) => {
+          const el = e.target.closest("[data-opening-element]");
+          if (el) this.onSelect(el.dataset.openingElement, "opening");
+        });
+      for (const [key, style] of Object.entries(c.layout || {})) {
+        const el = layer.querySelector(`[data-opening-element="${key}"]`);
+        if (!el) continue;
+        layer.firstElementChild.append(el);
+        Object.assign(el.style, {
+          position: "absolute",
+          left: (style.x ?? 50) + "%",
+          top: (style.y ?? 50) + "%",
+          right: "auto",
+          bottom: "auto",
+          transform: "translate(-50%,-50%)",
+          translate: "none",
+          margin: "0",
+          animation: "none",
+        });
+        if (style.width) el.style.width = style.width + "%";
+        if (style.size) el.style.fontSize = style.size / 19.2 + "cqw";
+        if (style.color) el.style.color = style.color;
+      }
+      this.openingObserver?.disconnect();
+      this.openingObserver = new ResizeObserver(() => this.fitOpeningLayer());
+      this.openingObserver.observe(this.stage);
+    }
+    for (const el of this.openingLayer.querySelectorAll(
+      "[data-opening-element]",
+    )) {
+      const range = c.elements?.[el.dataset.openingElement];
+      el.hidden =
+        range?.hidden ||
+        (range && (time < range.startMs || time > range.endMs));
+    }
+    const progress = this.openingLayer.querySelector("progress");
+    if (progress && !this.editing) progress.value = this.loadingProgress || 0;
+    this.fitOpeningLayer();
+  }
+  fitOpeningLayer() {
+    if (!this.openingLayer) return;
+    const media = this.visual.querySelector("video,img"),
+      ratio =
+        (media?.videoWidth || media?.naturalWidth || 16) /
+        (media?.videoHeight || media?.naturalHeight || 9);
+    const width = Math.min(
+        this.stage.clientWidth,
+        this.stage.clientHeight * ratio,
+      ),
+      frame = this.openingLayer.firstElementChild;
+    frame.style.width = width + "px";
+    frame.style.height = width / ratio + "px";
+  }
   paintScene(scene, time) {
+    this.paintOpening(scene, time);
     if (
       scene.source === "sequence" &&
       !this.loading &&
@@ -642,7 +746,8 @@ export class PlayerView {
     if (scene.source === "images")
       this.paintImage(scene, time).catch((e) => this.showError(e.message));
     const title = this.root.querySelector(".scene-title");
-    title.hidden = scene.clean && scene.role === "story";
+    title.hidden =
+      openingRole(scene) || (scene.clean && scene.role === "story");
     const text = `${scene.name}|${scene.subtitle}|${scene.role}`;
     if (title.dataset.text !== text) {
       title.dataset.text = text;
