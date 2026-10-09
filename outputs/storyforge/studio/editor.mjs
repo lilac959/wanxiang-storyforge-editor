@@ -823,22 +823,8 @@ function renderInspector() {
 function renderSettings() {
   const box = $(".settings-page");
   if (page === "theme") {
-    p().theme ||= { preset: "classic", accent: "#e5d6b1", text: "#f8f0e4" };
-    const t = p().theme;
     box.innerHTML =
-      '<h2>作品设置</h2><div class="settings-links"><button data-page="variables">剧情变量</button><button data-action="connect">在线保存</button><button data-page="assets" data-ui-category="true">互动 UI 素材库</button></div><h3>作品默认外观</h3>' +
-      field("样式", "theme.preset", t.preset, {
-        scope: "project",
-        options: { classic: "万象 · 经典", simple: "简洁" },
-      }) +
-      field("主题色", "theme.accent", t.accent, {
-        scope: "project",
-        type: "color",
-      }) +
-      field("选项文字颜色", "theme.text", t.text, {
-        scope: "project",
-        type: "color",
-      });
+      '<h2>作品设置</h2><div class="settings-links"><button data-page="variables">剧情变量</button><button data-action="connect">在线保存</button></div>';
     return;
   }
   if (page === "assets") {
