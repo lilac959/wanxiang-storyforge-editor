@@ -1,3 +1,4 @@
+import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
 import {
   trackRows,
   assignTrack,
@@ -86,6 +87,10 @@ import { demoProject } from "./demo.mjs";
 
 const $ = (s) => document.querySelector(s),
   assets = new AssetStore();
+let timelinePlaying = false,
+  timelineFrame = 0,
+  scrubFrame = 0,
+  snapEnabled = true;
 let storage = new Storage(assets, status),
   history,
   selected,
@@ -323,7 +328,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="从当前位置试玩">▷</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起卡片目录">卡片目录</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩场景</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容">复制</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="add-marker">添加标记</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">操作</button><button data-action="add-choice">选择</button><button data-action="add-hotspot">热点</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起卡片目录">卡片目录</button><button class="primary" data-action="new-card">＋ 新建卡片</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><button data-action="pan-mode" title="拖动画布">✥</button><button data-action="select-mode" title="框选">▱</button><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">显示全部</button><button data-action="toggle-lines">全部连线</button><button data-action="toggle-minimap">小地图</button><button data-action="arrange-graph" title="按剧情关系整理全部">自动排列</button><button data-action="arrange-selection" title="只整理选中节点">整理选中</button><button data-action="locate-entry" title="定位入口">定位起始剧情</button></div><div class="minimap" title="点击定位场景"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div></main><aside class="inspector"></aside></div>';
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
     onSelect: (id, kind = "event") => {
@@ -348,17 +353,21 @@ function shell() {
         sceneId: selected,
       });
   });
-  $("#seek").oninput = (e) => {
-    time = Number(e.target.value);
-    paintStill();
-    updatePlayhead();
-  };
+  $("#seek").hidden = true;
   $("#zoom").oninput = (e) => {
-    zoom = +e.target.value;
-    renderTimeline();
+    setTimelineZoom(+e.target.value);
   };
   $(".timeline-scroll").addEventListener("pointerdown", timelinePointer);
   $(".timeline-scroll").addEventListener("keydown", timelineKey);
+  $(".timeline-scroll").addEventListener("wheel", timelineWheel, {
+    passive: false,
+  });
+  $(".timeline-scroll").addEventListener("contextmenu", timelineContext);
+  document.addEventListener("keydown", previewKeys);
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".timeline-context"))
+      $(".timeline-context")?.remove();
+  });
   $(".canvas").addEventListener("pointerdown", canvasPointer);
   setupBoard();
   $(".library").addEventListener("dragstart", (e) => {
@@ -379,6 +388,7 @@ function shell() {
   });
 }
 function render() {
+  stopTimelinePlayback();
   for (const action of ["undo", "redo"]) {
     const button =
       $(".graph-bottomtools [data-action=" + action + "]") ||
@@ -473,7 +483,7 @@ function render() {
 function paintStill() {
   if (page !== "story" || graph) return;
   $(".canvas-label span").textContent = s().name;
-  $(".time-label").textContent = (time / 1000).toFixed(1) + "s";
+  $(".time-label").textContent = (time / 1000).toFixed(2) + "s";
   const sceneDuration = duration(s());
   $(".duration-label").textContent = Number.isFinite(sceneDuration)
     ? (sceneDuration / 1000).toFixed(1) + "s"
@@ -481,12 +491,13 @@ function paintStill() {
   $("#seek").max = editableDuration();
   $("#seek").value = time;
   still.previewHiddenTracks = previewTracks().hidden;
+  still.timelineRate = previewRate(s(), time);
   still
     .renderStill(
       p(),
       s(),
       time,
-      selection.kind === "event" ? selection.id : null,
+      !timelinePlaying && selection.kind === "event" ? selection.id : null,
     )
     .catch((e) => notify(e.message));
   $(".board-list").innerHTML = s()
@@ -632,8 +643,13 @@ function renderTimeline() {
       kind: "event",
       items: [],
     });
+  const scroll = $(".timeline-scroll").scrollLeft;
+  const ticks = rulerTicks(
+    d,
+    Math.max(200, $(".timeline-scroll").clientWidth * zoom - 70),
+  );
   $(".timeline-scroll").innerHTML =
-    `<div class="timeline-inner" style="width:${zoom * 100}%"><div class="ruler">${[0, 0.25, 0.5, 0.75, 1].map((n) => `<span style="left:${n * 100}%">${((d * n) / 1000).toFixed(1)}s</span>`).join("")}</div>${display
+    `<div class="timeline-inner" style="width:${zoom * 100}%"><div class="ruler">${ticks.map((t) => `<span style="left:${(t / d) * 100}%">${(t / 1000).toFixed(t < 1000 ? 2 : 1)}s</span>`).join("")}${(s().markers || []).map((x) => `<button class="timeline-marker" data-action="goto-marker" data-id="${esc(x.id)}" style="left:${(x.timeMs / d) * 100}%" title="${esc(x.name)} · ${(x.timeMs / 1000).toFixed(2)} 秒">◆</button>`).join("")}</div>${display
       .map((row) => {
         const type = row.kind === "visual" ? "overlay" : row.kind;
         const hidden = state.hidden.has(row.id),
@@ -652,14 +668,26 @@ function renderTimeline() {
             : ""
         }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${selection.id === x.id ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒"><i class="handle left" data-edge="left"></i>${esc(x.label)}<i class="handle right" data-edge="right"></i></div>`).join("")}</div></div>`;
       })
-      .join("")}<div class="playhead"></div></div>`;
+      .join(
+        "",
+      )}<div class="playhead"><button class="playhead-grip" aria-label="拖动播放头" title="拖动播放头"></button><span class="playhead-time"></span></div></div>`;
+  $(".timeline-scroll").scrollLeft = scroll;
   updatePlayhead();
 }
 function updatePlayhead() {
   const line = $(".playhead");
   if (line)
-    line.style.left = `calc(73px + (100% - 73px) * ${time / timelineSpan()})`;
-  $(".time-label").textContent = sec(time).toFixed(1) + "s";
+    line.style.left = `calc(70px + (100% - 70px) * ${time / timelineSpan()})`;
+  $(".time-label").textContent = sec(time).toFixed(2) + "s";
+  if ($(".playhead-time"))
+    $(".playhead-time").textContent = sec(time).toFixed(2) + "s";
+  const c = ["clip", "video", "image"].includes(selection.kind)
+    ? visualClips(s()).find((x) => x.id === selection.id)
+    : null;
+  const button = $('.timeline-head [data-action="split-clip"]');
+  if (button)
+    button.disabled =
+      !c || time <= c.startMs || time >= c.startMs + clipLength(c);
 }
 function renderInspector() {
   const panel = $(".inspector"),
@@ -1293,11 +1321,7 @@ async function boot() {
   status("已保存到本机");
 }
 async function preview({ full = false, here = false } = {}) {
-  const errors = validate(p()).filter((x) => x.level === "error");
-  if (errors.length) {
-    await showIssues(false);
-    return;
-  }
+  stopTimelinePlayback();
   previewSession?.dispose();
   const previewProject = clone(p());
   for (const scene of previewProject.scenes) {
@@ -1308,6 +1332,14 @@ async function preview({ full = false, here = false } = {}) {
   previewSession = new Session($(".preview-host"), assets, {
     editor: true,
     onExit: () => $("#preview").close(),
+    onBlocked: (sceneId, eventId) => {
+      $("#preview").close();
+      selected = sceneId;
+      page = "story";
+      graph = false;
+      selection = eventId ? { kind: "event", id: eventId } : { kind: "scene" };
+      render();
+    },
   });
   $("#preview").showModal();
   const previewPage =
@@ -2194,11 +2226,96 @@ async function handleAction(action, button) {
     case "preview-all":
       await preview({ full: true });
       break;
+    case "toggle-snap":
+      snapEnabled = !snapEnabled;
+      button.textContent = snapEnabled ? "吸附：开" : "吸附：关";
+      button.setAttribute("aria-pressed", String(snapEnabled));
+      break;
+    case "fit-timeline":
+      setTimelineZoom(1, 70);
+      break;
+    case "add-marker":
+      panel(
+        `<h2>添加时间标记</h2><label class="field">名称<input id="marker-name" value="时间标记"></label><button data-action="save-marker">添加</button>`,
+      );
+      break;
+    case "save-marker": {
+      const name = $("#marker-name").value.trim() || "时间标记";
+      mutate("添加时间标记", () => {
+        s().markers ||= [];
+        s().markers.push({ id: uid("marker"), name, timeMs: time });
+      });
+      $("#panel").close();
+      break;
+    }
+    case "goto-marker": {
+      const marker = s().markers.find((x) => x.id === button.dataset.id);
+      stopTimelinePlayback();
+      time = marker.timeMs;
+      paintStill();
+      updatePlayhead();
+      panel(
+        `<h2>${esc(marker.name)}</h2><p>${(time / 1000).toFixed(2)} 秒</p><label class="field">名称<input id="marker-name" value="${esc(marker.name)}"></label><button data-action="rename-marker" data-id="${esc(marker.id)}">保存名称</button><button data-action="delete-marker" data-id="${esc(marker.id)}">删除标记</button>`,
+      );
+      break;
+    }
+    case "rename-marker": {
+      const name = $("#marker-name").value.trim() || "时间标记";
+      mutate(
+        "修改时间标记",
+        () => (s().markers.find((x) => x.id === button.dataset.id).name = name),
+      );
+      $("#panel").close();
+      break;
+    }
+    case "delete-marker":
+      mutate(
+        "删除时间标记",
+        () =>
+          (s().markers = s().markers.filter((x) => x.id !== button.dataset.id)),
+      );
+      $("#panel").close();
+      break;
+    case "lift-selected":
+      mutate("提到叠加轨道", () => {
+        const c = currentClip();
+        const x = liftVisual(s(), c.id, c.startMs);
+        assignTrack(s(), "overlay", x);
+        selection = { kind: "overlay", id: x.id };
+      });
+      break;
+    case "align-start":
+    case "align-end": {
+      const obj = selectObject(),
+        isMain = ["clip", "video", "image"].includes(selection.kind);
+      mutate("对齐播放头", () => {
+        if (isMain) {
+          const c = currentClip();
+          moveClip(
+            s(),
+            c.id,
+            action === "align-start" ? time : time - clipLength(c),
+          );
+        } else {
+          const length = obj.endMs - obj.startMs;
+          obj.startMs = Math.max(
+            0,
+            action === "align-start" ? time : time - length,
+          );
+          obj.endMs = obj.startMs + length;
+          if (
+            ["event", "subtitle", "audio", "overlay"].includes(selection.kind)
+          )
+            assignTrack(s(), selection.kind, obj, obj.trackId);
+        }
+      });
+      break;
+    }
     case "preview-current":
       await preview();
       break;
     case "preview-here":
-      await preview({ here: true });
+      toggleTimelinePlayback();
       break;
     case "import":
       $("#importFile").click();
@@ -2408,11 +2525,12 @@ function timelineItemStyle(x, d) {
 }
 function snappedTime(value, exclude, width, alt = false) {
   value = Math.max(0, Math.round(value));
-  if (alt) return value;
+  if (alt || !snapEnabled) return value;
   const threshold = (8 / Math.max(1, width)) * timelineSpan();
   const points = [
     0,
     time,
+    ...(s().markers || []).map((x) => x.timeMs),
     ...items()
       .filter((x) => x.id !== exclude)
       .flatMap((x) => [x.start, x.end]),
@@ -2508,18 +2626,9 @@ function timelinePointer(e) {
     notify("这条轨道已锁定，请先解锁再拖动");
     return;
   }
+  stopTimelinePlayback();
   if (!clip) {
-    const lane = e.target.closest(".ruler,.lane");
-    if (lane) {
-      const r = lane.getBoundingClientRect();
-      time = clamp(
-        Math.round(((e.clientX - r.left) / r.width) * timelineSpan()),
-        0,
-        editableDuration(),
-      );
-      paintStill();
-      updatePlayhead();
-    }
+    if (e.target.closest(".ruler,.lane,.playhead")) beginTimelineScrub(e);
     return;
   }
   e.preventDefault();
@@ -2551,7 +2660,8 @@ function timelinePointer(e) {
     span = timelineSpan(),
     source = items().find((x) => x.id === obj.id),
     startX = e.clientX,
-    startY = e.clientY;
+    startY = e.clientY,
+    startScroll = $(".timeline-scroll").scrollLeft;
   let delta = 0,
     moved = false,
     dropRow = null;
@@ -2572,7 +2682,13 @@ function timelinePointer(e) {
           .forEach((x) => x.classList.remove("drop-lane"));
         dropRow?.querySelector(".lane")?.classList.add("drop-lane");
       }
-      const raw = ((ev.clientX - startX) / rect.width) * span;
+      const raw =
+        ((ev.clientX -
+          startX +
+          $(".timeline-scroll").scrollLeft -
+          startScroll) /
+          rect.width) *
+        span;
       let target = snappedTime(anchor + raw, obj.id, rect.width, ev.altKey);
       if (!edge && selection.kind !== "clip") {
         const length = source.end - source.start;
@@ -2592,21 +2708,66 @@ function timelinePointer(e) {
       moved ||=
         Math.abs(ev.clientX - startX) > 3 ||
         (!edge && Math.abs(ev.clientY - startY) > 3);
-      const lo =
+      let lo =
         edge === "left"
           ? Math.max(0, Math.min(source.end - 100, source.start + delta))
           : edge === "right"
             ? source.start
             : Math.max(0, source.start + delta);
-      const hi =
+      let hi =
         edge === "right"
           ? Math.max(source.start + 100, source.end + delta)
           : edge === "left"
             ? source.end
             : lo + source.end - source.start;
+      if (edge && selection.kind === "clip") {
+        const draft = clone(s());
+        trimVisual(
+          draft,
+          obj.id,
+          edge,
+          delta,
+          obj.kind === "video" ? p().assets[obj.assetId].durationMs : 7200000,
+        );
+        const trimmed = draft.clips.find((x) => x.id === obj.id);
+        lo = trimmed.startMs;
+        hi = lo + clipLength(trimmed);
+      } else if (selection.kind !== "clip") {
+        const d = editableDuration(),
+          min = selection.kind === "event" ? 0 : 100;
+        const media =
+          selection.kind === "audio" ||
+          (selection.kind === "overlay" &&
+            p().assets[obj.assetId]?.kind === "video");
+        if (edge === "left")
+          lo = Math.max(
+            media ? before.startMs - (before.inMs || 0) : 0,
+            Math.min(before.endMs - min, lo),
+          );
+        else if (edge === "right")
+          hi = clamp(
+            hi,
+            before.startMs + min,
+            media
+              ? Math.min(
+                  d,
+                  before.startMs +
+                    p().assets[obj.assetId].durationMs -
+                    (before.inMs || 0),
+                )
+              : d,
+          );
+        else {
+          lo = clamp(lo, 0, d - (source.end - source.start));
+          hi = lo + source.end - source.start;
+        }
+      }
+      delta = edge === "right" ? hi - source.end : lo - source.start;
+      target = anchor + delta;
       clip.style.left = (lo / span) * 100 + "%";
       clip.style.width = Math.max(0.6, ((hi - lo) / span) * 100) + "%";
       guide.style.left = (target / span) * 100 + "%";
+      guide.dataset.label = `${(lo / 1000).toFixed(2)}—${(hi / 1000).toFixed(2)} 秒 · 时长 ${((hi - lo) / 1000).toFixed(2)} 秒`;
       clip.title =
         (lo / 1000).toFixed(2) + " — " + (hi / 1000).toFixed(2) + " 秒";
       const scroller = $(".timeline-scroll"),
@@ -2725,7 +2886,8 @@ function timelinePointer(e) {
 }
 function timelineKey(e) {
   const clip = e.target.closest("[data-clip]");
-  if (!clip || !["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+  if (!clip || !e.altKey || !["ArrowLeft", "ArrowRight"].includes(e.key))
+    return;
   if (previewTracks().locked.has(clip.closest(".track").dataset.trackId))
     return;
   e.preventDefault();
@@ -3531,7 +3693,7 @@ function showClipDelete() {
     return;
   }
   panel(
-    `<h2>删除片段</h2><label class="field">后续内容<select id="delete-ripple"><option value="no">保留空位</option><option value="yes">一起前移</option></select></label>${linked(s(), c.id).length ? '<label class="field check"><input id="delete-linked" type="checkbox" checked>同时删除关联字幕、互动和声音</label>' : ""}<button class="danger" data-action="confirm-delete-clip">删除片段</button>`,
+    `<h2>删除片段</h2><label class="field">后续内容<select id="delete-ripple"><option value="no">保留时间空隙</option><option value="yes">删除并前移后续内容</option></select></label>${linked(s(), c.id).length ? '<label class="field check"><input id="delete-linked" type="checkbox">同时删除关联字幕、互动和声音</label>' : ""}<button class="danger" data-action="confirm-delete-clip">删除片段</button>`,
   );
 }
 function archiveList() {
@@ -3571,7 +3733,7 @@ async function showProjects() {
       esc(row.name) +
       '</h3><details class="more-menu project-actions"><summary aria-label="' +
       esc(row.name) +
-      '操作">···</summary><div><button data-action="rename-project" data-id="' +
+      '操作">更多操作</summary><div><button data-action="rename-project" data-id="' +
       esc(row.id) +
       '">重命名</button><button data-action="copy-project" data-id="' +
       esc(row.id) +
@@ -4402,4 +4564,234 @@ function disconnectFlow() {
   );
   board.activeEdge = null;
   render();
+}
+
+function stopTimelinePlayback() {
+  timelinePlaying = false;
+  cancelAnimationFrame(timelineFrame);
+  if (still) {
+    still.timelinePlaying = false;
+    still.pauseMedia();
+  }
+  const button = $('[data-action="preview-here"]');
+  if (button) {
+    button.textContent = "▷ 播放";
+    button.setAttribute("aria-label", "播放预览");
+  }
+}
+function toggleTimelinePlayback() {
+  if (timelinePlaying) {
+    stopTimelinePlayback();
+    return;
+  }
+  if (time >= editableDuration()) time = 0;
+  timelinePlaying = true;
+  still.timelinePlaying = true;
+  const button = $('[data-action="preview-here"]');
+  button.textContent = "Ⅱ 暂停";
+  button.setAttribute("aria-label", "暂停预览");
+  let previous = performance.now();
+  const step = (now) => {
+    if (!timelinePlaying || page !== "story" || graph) {
+      stopTimelinePlayback();
+      return;
+    }
+    if (!still.loading && !still.message.hidden) {
+      stopTimelinePlayback();
+      return;
+    }
+    if (!still.loading && !still.buffering)
+      time = Math.min(
+        editableDuration(),
+        time + Math.min(100, now - previous) * previewRate(s(), time),
+      );
+    previous = now;
+    paintStill();
+    updatePlayhead();
+    followPlayhead();
+    if (time >= editableDuration()) {
+      stopTimelinePlayback();
+      return;
+    }
+    timelineFrame = requestAnimationFrame(step);
+  };
+  timelineFrame = requestAnimationFrame(step);
+}
+function followPlayhead() {
+  const scroll = $(".timeline-scroll"),
+    inner = scroll.querySelector(".timeline-inner");
+  if (!inner) return;
+  const x = 70 + ((inner.clientWidth - 70) * time) / timelineSpan();
+  if (x - scroll.scrollLeft > scroll.clientWidth - 30)
+    scroll.scrollLeft = x - scroll.clientWidth + 100;
+  if (x - scroll.scrollLeft < 70) scroll.scrollLeft = Math.max(0, x - 100);
+}
+function queueStill() {
+  if (scrubFrame) return;
+  scrubFrame = requestAnimationFrame(() => {
+    scrubFrame = 0;
+    paintStill();
+  });
+}
+function beginTimelineScrub(e) {
+  e.preventDefault();
+  const scroll = $(".timeline-scroll"),
+    ruler = scroll.querySelector(".ruler");
+  if (!ruler) return;
+  const controller = new AbortController();
+  let pointerX = e.clientX,
+    frame;
+  scroll.classList.add("scrubbing");
+  const move = () => {
+    const rect = ruler.getBoundingClientRect();
+    time = clamp(
+      Math.round(((pointerX - rect.left) / rect.width) * timelineSpan()),
+      0,
+      editableDuration(),
+    );
+    updatePlayhead();
+    queueStill();
+  };
+  const autoScroll = () => {
+    const r = scroll.getBoundingClientRect();
+    const delta =
+      pointerX > r.right - 30 ? 14 : pointerX < r.left + 90 ? -14 : 0;
+    if (delta) {
+      scroll.scrollLeft += delta;
+      move();
+    }
+    frame = requestAnimationFrame(autoScroll);
+  };
+  move();
+  frame = requestAnimationFrame(autoScroll);
+  window.addEventListener(
+    "pointermove",
+    (ev) => {
+      pointerX = ev.clientX;
+      move();
+    },
+    { signal: controller.signal },
+  );
+  const finish = () => {
+    controller.abort();
+    cancelAnimationFrame(frame);
+    scroll.classList.remove("scrubbing");
+    paintStill();
+  };
+  window.addEventListener("pointerup", finish, {
+    once: true,
+    signal: controller.signal,
+  });
+  window.addEventListener("pointercancel", finish, {
+    once: true,
+    signal: controller.signal,
+  });
+}
+function setTimelineZoom(value, viewportX) {
+  const scroll = $(".timeline-scroll"),
+    inner = scroll.querySelector(".timeline-inner");
+  const local =
+    viewportX ??
+    Math.min(
+      scroll.clientWidth - 30,
+      Math.max(
+        70,
+        70 +
+          ((inner.clientWidth - 70) * time) / timelineSpan() -
+          scroll.scrollLeft,
+      ),
+    );
+  const fraction = (scroll.scrollLeft + local - 70) / (inner.clientWidth - 70);
+  zoom = clamp(value, 1, 8);
+  $("#zoom").value = zoom;
+  renderTimeline();
+  scroll.scrollLeft = zoomScroll(
+    fraction,
+    scroll.querySelector(".timeline-inner").clientWidth - 70,
+    local,
+  );
+}
+function timelineWheel(e) {
+  if (e.ctrlKey || e.metaKey) {
+    e.preventDefault();
+    setTimelineZoom(
+      zoom * Math.exp(-e.deltaY * 0.002),
+      e.clientX - e.currentTarget.getBoundingClientRect().left,
+    );
+  } else if (e.shiftKey) {
+    e.preventDefault();
+    e.currentTarget.scrollLeft += e.deltaY || e.deltaX;
+  }
+}
+function previewKeys(e) {
+  if (
+    page !== "story" ||
+    graph ||
+    e.target.closest('input,textarea,select,[contenteditable="true"]') ||
+    document.querySelector("dialog[open]")
+  )
+    return;
+  if (e.code === "Space") {
+    e.preventDefault();
+    toggleTimelinePlayback();
+  } else if (
+    ["ArrowLeft", "ArrowRight"].includes(e.key) &&
+    !e.altKey &&
+    !e.ctrlKey &&
+    !e.metaKey
+  ) {
+    e.preventDefault();
+    stopTimelinePlayback();
+    time = clamp(
+      time + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 100),
+      0,
+      editableDuration(),
+    );
+    updatePlayhead();
+    queueStill();
+    followPlayhead();
+  }
+}
+function timelineContext(e) {
+  const clip = e.target.closest("[data-clip]");
+  if (!clip) return;
+  e.preventDefault();
+  $(".timeline-context")?.remove();
+  stopTimelinePlayback();
+  selection = { kind: clip.dataset.kind, id: clip.dataset.clip };
+  renderInspector();
+  const main = ["clip", "video", "image"].includes(selection.kind),
+    c = main ? currentClip() : null;
+  const locked = previewTracks().locked.has(
+    clip.closest(".track").dataset.trackId,
+  );
+  const actions = [
+    [
+      "split-clip",
+      "分割",
+      !c || time <= c.startMs || time >= c.startMs + clipLength(c),
+    ],
+    ["copy-item", "复制", selection.kind === "opening"],
+    ["delete-item", "删除", false],
+    ["align-start", "开始位置对齐播放头", selection.kind === "opening"],
+    ["align-end", "结束位置对齐播放头", selection.kind === "opening"],
+    ...(main ? [["lift-selected", "提到叠加轨道", false]] : []),
+  ];
+  const menu = document.createElement("div");
+  menu.className = "timeline-context";
+  menu.setAttribute("role", "menu");
+  menu.innerHTML = actions
+    .map(
+      ([a, label, disabled]) =>
+        `<button data-action="${a}" ${disabled || locked ? "disabled" : ""}>${label}</button>`,
+    )
+    .join("");
+  document.body.append(menu);
+  menu.style.left = Math.min(e.clientX, window.innerWidth - 220) + "px";
+  menu.style.top =
+    Math.max(
+      0,
+      Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8),
+    ) + "px";
+  menu.addEventListener("click", () => menu.remove());
 }

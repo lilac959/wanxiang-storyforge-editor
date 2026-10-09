@@ -351,9 +351,15 @@ export class PlayerView {
     if (this.video && Number.isFinite(this.video.duration)) {
       const wanted =
         (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
-      if (Math.abs(this.video.currentTime - wanted) > 0.03)
+      if (
+        Math.abs(this.video.currentTime - wanted) >
+        (this.timelinePlaying ? 0.2 : 0.03)
+      )
         this.video.currentTime = Math.min(wanted, this.video.duration);
-      this.video.pause();
+      if (this.timelinePlaying) {
+        this.video.playbackRate = this.timelineRate || 1;
+        if (this.video.paused) this.video.play().catch(() => {});
+      } else this.video.pause();
     }
     this.paintScene(scene, time);
     const event =
@@ -365,6 +371,25 @@ export class PlayerView {
             (time <= e.endMs || e.startMs === duration(scene)),
         ));
     this.paintEvent(event);
+    for (const clip of scene.audio) {
+      const audio = this.audio.get(clip.id);
+      if (!audio) continue;
+      const active =
+        this.timelinePlaying &&
+        !this.previewHiddenTracks?.has(itemTrackId(scene, clip, "audio")) &&
+        time >= clip.startMs &&
+        time < clip.endMs;
+      if (!active) {
+        audio.pause();
+        continue;
+      }
+      const wanted = (time - clip.startMs + clip.inMs) / 1000;
+      if (audio.readyState && Math.abs(audio.currentTime - wanted) > 0.2)
+        audio.currentTime = wanted;
+      audio.playbackRate = this.timelineRate || 1;
+      audio.volume = clamp(clip.volume ?? 1, 0, 1);
+      if (audio.paused) audio.play().catch(() => {});
+    }
   }
   async mount(scene, time = 0) {
     const token = ++this.token;
@@ -377,6 +402,8 @@ export class PlayerView {
     this.eventId = null;
     this.hud.innerHTML = "";
     this.loading = true;
+    this.message.hidden = false;
+    this.message.textContent = "正在读取素材…";
     this.stillImage = null;
     this.stage.classList.toggle("grayscale", scene.grayscale);
     this.stage.classList.toggle("death", scene.role === "death");
@@ -485,7 +512,9 @@ export class PlayerView {
     } catch (error) {
       if (token === this.token) {
         this.loading = false;
-        this.showError(error.message);
+        this.showError(
+          `${this.project.assets[current?.assetId]?.name || scene.name}：${error.message}`,
+        );
       }
     }
   }
@@ -880,12 +909,17 @@ export class PlayerView {
       const x = list.find((x) => x.id === el.dataset.overlayId);
       const wanted = (time - x.startMs + (x.inMs || 0)) / 1000;
       el.dataset.wanted = wanted;
-      el.muted = this.editing || this.muted;
+      el.muted = (this.editing && !this.timelinePlaying) || this.muted;
       el.volume = clamp(x.volume ?? 1, 0, 1);
       if (el.readyState && Math.abs(el.currentTime - wanted) > 0.12)
         el.currentTime = wanted;
-      if (!this.editing && this.runtime?.playing && !this.runtime.mediaPaused) {
-        el.playbackRate = this.runtime.rate;
+      if (
+        this.timelinePlaying ||
+        (!this.editing && this.runtime?.playing && !this.runtime.mediaPaused)
+      ) {
+        el.playbackRate = this.timelinePlaying
+          ? this.timelineRate || 1
+          : this.runtime.rate;
         if (el.paused) el.play().catch(() => {});
       } else el.pause();
     }
@@ -982,6 +1016,7 @@ export class PlayerView {
     this.frame = requestAnimationFrame((t) => this.loop(t));
   }
   showError(text) {
+    this.timelinePlaying = false;
     this.pauseMedia();
     this.runtime?.pause();
     this.message.hidden = false;
@@ -993,6 +1028,7 @@ export class PlayerView {
         const time = r.timeMs;
         this.mount(r.scene, time).then(() => r.resume());
       });
+    this.onChange({ type: "media-error", message: text }, this.runtime);
   }
   preloadNext(scene) {
     for (const v of this.prefetch || []) {

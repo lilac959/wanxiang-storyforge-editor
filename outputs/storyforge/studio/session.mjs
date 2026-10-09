@@ -5,11 +5,16 @@ import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 import { openingCard } from "./model.mjs";
 export class Session {
-  constructor(root, assets, { onExit = () => {}, editor = false } = {}) {
+  constructor(
+    root,
+    assets,
+    { onExit = () => {}, onBlocked = () => {}, editor = false } = {},
+  ) {
     this.root = root;
     this.assets = assets;
     this.onExit = onExit;
     this.editor = editor;
+    this.onBlocked = onBlocked;
     this.token = 0;
   }
   clear() {
@@ -268,6 +273,17 @@ export class Session {
     this.root.innerHTML = '<div class="player-root"></div>';
     this.player = new PlayerView(this.root.firstElementChild, this.assets, {
       onExit: () => this.home(),
+      onChange: (event, runtime) => {
+        if (!this.editor || !["blocked", "media-error"].includes(event.type))
+          return;
+        const message = this.player.message;
+        message.hidden = false;
+        message.innerHTML = `<p>${esc(runtime?.scene?.name || "当前卡片")}：${esc(event.message)}</p><button data-locate-blocked>返回编辑并定位</button><button data-exit-blocked>退出试玩</button>`;
+        message.querySelector("[data-locate-blocked]").onclick = () =>
+          this.onBlocked(event.sceneId || runtime?.scene?.id, event.eventId);
+        message.querySelector("[data-exit-blocked]").onclick = () =>
+          this.onExit();
+      },
     });
     this.player.start(this.project, sceneId, time);
     if (this.project.unifiedCards) {
@@ -364,6 +380,16 @@ export class Session {
       this.clear();
       this.root.innerHTML = `<div class="opening"><div class="opening-error"><h2>暂时无法开始</h2><p>${esc(error.message)}</p><button>重试加载</button></div></div>`;
       this.root.querySelector("button").onclick = () => this.open(p);
+      if (this.editor) {
+        const locate = document.createElement("button");
+        locate.textContent = "返回编辑并定位";
+        locate.onclick = () => this.onBlocked(loading?.id || p.entryId);
+        this.root.querySelector(".opening-error").append(locate);
+        const exit = document.createElement("button");
+        exit.textContent = "退出试玩";
+        exit.onclick = () => this.onExit();
+        this.root.querySelector(".opening-error").append(exit);
+      }
     }
   }
   dispose() {

@@ -38,6 +38,7 @@ export class Runtime {
     }
     this.generation++;
     this.scene = scene;
+    this.pendingEventId = null;
     this.timeMs = clamp(Math.round(time), 0, duration(scene));
     this.playing = true;
     this.state = "playing";
@@ -146,8 +147,10 @@ export class Runtime {
         return;
       }
       const target = this.pending || this.scene.next;
+      const eventId = this.pending ? this.pendingEventId : null;
       this.pending = null;
-      this.follow(target);
+      this.pendingEventId = null;
+      this.follow(target, eventId);
       if (token === this.generation && target.kind === "continue")
         this.complete();
       return;
@@ -179,14 +182,29 @@ export class Runtime {
         )
           this.suppressedSpeeds.add(f.id);
     this.emit("result", { ok, event: e });
-    if (result.timing === "sceneEnd" && result.target.kind !== "continue")
+    if (result.timing === "sceneEnd" && result.target.kind !== "continue") {
       this.pending = clone(result.target);
-    else this.follow(result.target);
+      this.pendingEventId = e.id;
+    } else this.follow(result.target, e.id);
     this.emit();
     return true;
   }
-  follow(target) {
-    if (target.kind === "scene") this.enter(target.sceneId);
+  follow(target, eventId = null) {
+    if (
+      target.kind === "unlinked" ||
+      (target.kind === "scene" &&
+        !this.project.scenes.some((s) => s.id === target.sceneId))
+    ) {
+      this.complete();
+      this.emit("blocked", {
+        sceneId: this.scene?.id,
+        eventId,
+        message:
+          target.kind === "unlinked"
+            ? "这条剧情出口还没有连接下一张卡片"
+            : "目标卡片不存在",
+      });
+    } else if (target.kind === "scene") this.enter(target.sceneId);
     else if (target.kind === "home") {
       this.stop();
       this.emit("home");
