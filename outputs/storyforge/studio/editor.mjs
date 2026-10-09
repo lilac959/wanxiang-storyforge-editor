@@ -338,12 +338,13 @@ function render() {
       $(".workspace-head").append(button.cloneNode(true));
   }
   const menu = $(".general-menu");
-  const menuHost =
-    page === "story" && graph ? $(".graph-toptools") : $(".workspace-head");
+  const menuHost = $(".topbar");
   if (menu.parentElement !== menuHost) {
     menu.removeAttribute("open");
-    menuHost.prepend(menu);
+    menuHost.insertBefore(menu, menuHost.querySelector('[data-action="save"]'));
   }
+  if (menu.nextElementSibling?.dataset.action !== "save")
+    menuHost.insertBefore(menu, menuHost.querySelector('[data-action="save"]'));
   for (const a of ["redo", "undo"]) {
     const b = $(".topbar [data-action=" + a + "]");
     if (b) $(".graph-bottomtools").prepend(b);

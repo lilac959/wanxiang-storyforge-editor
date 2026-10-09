@@ -1472,8 +1472,8 @@ body[data-view="graph"][data-directory="true"][data-inspector="false"] .layout {
   flex-shrink: 0;
 }
 .general-menu > div {
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
   min-width: 190px;
 }
 .general-menu > summary {
@@ -1491,6 +1491,7 @@ body[data-view="settings"] .layout {
 body[data-view="settings"] .library {
   display: none;
 }
+body[data-view="settings"] .workspace-head .back-button,
 body[data-view="settings"] .workspace-head [data-action="preview-current"],
 body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
   display: none;
@@ -1847,7 +1848,7 @@ body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
 .component-preview[data-background="light"] .scenery > div {
   display: none;
 }
-/* Fixed work-area menu and compact project management. */
+/* Header menu and compact project management. */
 .general-menu > summary {
   width: 36px;
   flex-shrink: 0;
@@ -1856,9 +1857,6 @@ body[data-view="settings"] .workspace-head .more-menu:not(.general-menu) {
   border: 0;
   border-top: 1px solid var(--line);
   margin: 5px 3px;
-}
-.workspace-head .general-menu {
-  margin-right: 8px;
 }
 .workspace-head {
   position: sticky;
