@@ -102,9 +102,9 @@ test("legacy repair recovers numeric strings and untrimmed ends without inventin
   const e = newEvent(1000);
   e.startMs = null;
   s.events.push(e);
-  assert.equal(repairTimelineData(p), 2);
+  assert.equal(repairTimelineData(p), 3);
   assert.equal(c.outMs, 10000);
-  assert.equal(e.startMs, null);
+  assert.equal(e.startMs, 0);
   assert.equal(repairTimelineData(p), 0);
 });
 test("unambiguous legacy speed migrates once while ambiguous ranges remain intact", () => {
@@ -152,4 +152,57 @@ test("sequential interactions share one stable track; overlap creates a separate
   assignTrack(s, "event", next);
   assert.equal(trackRows(s).filter((r) => r.kind === "event").length, 2);
   assert.equal(consolidateInteractionTracks(s), false);
+});
+
+test("legacy zero and null intervals recover without changing valid edits", () => {
+  const { p, s, c } = setup();
+  c.startMs = null;
+  c.outMs = 0;
+  s.subtitles = [{ id: "sub", startMs: 0, endMs: 0 }];
+  s.events = [{ id: "event", startMs: 3700, endMs: null, timeoutMs: 4000 }];
+  s.audio = [
+    {
+      id: "audio",
+      assetId: "a",
+      startMs: 1000,
+      inMs: 2000,
+      endMs: 0,
+      playbackRate: 2,
+    },
+  ];
+  const preserved = {
+    id: "trim",
+    kind: "video",
+    assetId: "a",
+    startMs: 15000,
+    inMs: 2000,
+    outMs: 5000,
+  };
+  s.clips.push(preserved);
+  assert.ok(repairTimelineData(p) > 0);
+  assert.equal(c.startMs, 0);
+  assert.equal(c.outMs, 10000);
+  assert.equal(s.subtitles[0].endMs, 2000);
+  assert.equal(s.events[0].endMs, 7700);
+  assert.equal(s.audio[0].endMs, 5000);
+  assert.deepEqual(preserved, {
+    id: "trim",
+    kind: "video",
+    assetId: "a",
+    startMs: 15000,
+    inMs: 2000,
+    outMs: 5000,
+  });
+  assert.equal(repairTimelineData(p), 0);
+});
+test("missing source metadata remains recoverable after metadata arrives", () => {
+  const { p, s, c } = setup();
+  delete p.assets.a.durationMs;
+  c.outMs = null;
+  repairTimelineData(p);
+  assert.equal(c.outMs, null);
+  p.assets.a.durationMs = 6100;
+  repairTimelineData(p);
+  assert.equal(c.outMs, 6100);
+  assert.ok(newEvent(NaN, "qte", 0).endMs > 0);
 });

@@ -1946,7 +1946,7 @@ async function handleAction(action, button) {
     case "add-choice":
     case "add-hotspot": {
       const e = newEvent(
-        Math.min(time, duration(s())),
+        Math.min(time, Math.max(0, duration(s()) - 100)),
         action === "add-choice"
           ? "choice"
           : action === "add-hotspot"
@@ -1963,7 +1963,10 @@ async function handleAction(action, button) {
       const x = {
         id: uid("subtitle"),
         startMs: Math.min(time, Math.max(0, duration(s()) - 100)),
-        endMs: Math.min(duration(s()), time + 2000),
+        endMs: Math.min(
+          duration(s()),
+          Math.min(time, Math.max(0, duration(s()) - 100)) + 2000,
+        ),
         text: "在这里写字幕",
         x: 50,
         y: 88,
@@ -1982,7 +1985,10 @@ async function handleAction(action, button) {
         id: uid("effect"),
         kind: action === "add-speed" ? "speed" : "bars",
         startMs: Math.min(time, Math.max(0, duration(s()) - 100)),
-        endMs: Math.min(duration(s()), time + 2000),
+        endMs: Math.min(
+          duration(s()),
+          Math.min(time, Math.max(0, duration(s()) - 100)) + 2000,
+        ),
         value: action === "add-speed" ? 0.5 : 6,
       };
       mutate("添加效果区间", () => s().effects.push(x));
@@ -5893,7 +5899,16 @@ function fixInspectorHeader() {
 }
 
 function validTimelineEntry(x) {
-  return Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start;
+  return (
+    Number.isFinite(x.start) &&
+    Number.isFinite(x.end) &&
+    (x.end > x.start ||
+      (x.kind === "event" &&
+        x.end === x.start &&
+        ["clock", "wait"].includes(
+          s().events.find((e) => e.id === x.id)?.endMode,
+        )))
+  );
 }
 function speedFields(item, kind) {
   const rate = mediaRate(item),
@@ -5904,6 +5919,11 @@ let repairingTimeline = false;
 async function autoRepairTimeline() {
   if (repairingTimeline || idleWorkspace) return;
   repairingTimeline = true;
+  const immediate = structuredClone(p());
+  if (repairTimelineData(immediate)) {
+    storage.backup(p(), "时间轴恢复前");
+    mutate("恢复素材长度与默认时间", () => Object.assign(p(), immediate));
+  }
   const before = JSON.stringify(p()),
     projectId = p().id;
   try {
@@ -5914,7 +5934,11 @@ async function autoRepairTimeline() {
     migrateLegacySpeed(result.project);
     for (const scene of result.project.scenes)
       consolidateInteractionTracks(scene);
-    if (p().id !== projectId || JSON.stringify(p()) !== before) return;
+    if (p().id !== projectId) return;
+    if (JSON.stringify(p()) !== before) {
+      setTimeout(autoRepairTimeline, 500);
+      return;
+    }
     if (JSON.stringify(result.project) !== before) {
       storage.backup(p(), "时间轴整理前");
       mutate("自动恢复时间与整理轨道", () =>

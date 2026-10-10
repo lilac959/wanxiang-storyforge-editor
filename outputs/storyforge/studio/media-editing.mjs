@@ -1,3 +1,4 @@
+import { duration } from "./model.mjs";
 import {
   ensureSequence,
   clipLength,
@@ -91,10 +92,17 @@ export function splitRange(scene, item, kind, time) {
   return right;
 }
 
-// Recover only explicit numeric values and an untrimmed video's missing end.
-// Null placement, creative trim points and interaction intervals stay unresolved.
+// Restore invalid legacy intervals from source metadata and type defaults.
+// Existing valid placement and trims are preserved. Callers back up before applying.
 export function repairTimelineData(project) {
   let count = 0;
+  const put = (x, key, value) => {
+    if (x[key] !== value) {
+      x[key] = value;
+      count++;
+    }
+  };
+  const positive = (x) => Number.isSafeInteger(x) && x >= 100;
   for (const scene of project.scenes) {
     const entries = [
       ...(scene.clips || []),
@@ -103,24 +111,72 @@ export function repairTimelineData(project) {
       ...collections.flatMap((k) => scene[k] || []),
     ];
     for (const x of entries) {
-      for (const key of ["startMs", "endMs", "inMs", "outMs", "durationMs"]) {
-        if (typeof x[key] === "string" && /^\d+(\.\d+)?$/.test(x[key].trim())) {
-          x[key] = Math.round(Number(x[key]));
-          count++;
+      for (const key of [
+        "startMs",
+        "endMs",
+        "inMs",
+        "outMs",
+        "durationMs",
+        "timeoutMs",
+      ])
+        if (typeof x[key] === "string" && /^\d+(\.\d+)?$/.test(x[key].trim()))
+          put(x, key, Math.round(Number(x[key])));
+    }
+    let cursor = 0;
+    for (const x of scene.source === "sequence"
+      ? scene.clips || []
+      : scene.video
+        ? [scene.video]
+        : []) {
+      const asset = project.assets[x.assetId];
+      if (!validTime(x.startMs)) put(x, "startMs", cursor);
+      if (!validTime(x.inMs)) put(x, "inMs", 0);
+      if (!positive(x.outMs - x.inMs)) {
+        const end =
+          asset?.kind === "image" || x.kind === "image"
+            ? x.inMs + 3000
+            : asset?.durationMs;
+        if (positive(end - x.inMs)) put(x, "outMs", end);
+      }
+      if (positive(clipLength(x)))
+        cursor = Math.max(cursor, x.startMs + clipLength(x));
+    }
+    for (const x of scene.images || [])
+      if (!positive(x.durationMs)) put(x, "durationMs", 3000);
+    const sceneEnd = duration(scene);
+    for (const key of collections)
+      for (const x of scene[key] || []) {
+        const parent = (scene.clips || []).find((c) => c.id === x.linkedClipId);
+        if (!validTime(x.startMs)) put(x, "startMs", parent?.startMs ?? 0);
+        if (positive(x.endMs - x.startMs)) continue;
+        // A waiting/clock interaction exactly at the last frame is an intentional cue.
+        if (
+          key === "events" &&
+          x.startMs === sceneEnd &&
+          x.endMs === sceneEnd &&
+          ["clock", "wait"].includes(x.endMode)
+        )
+          continue;
+        let length;
+        const asset = project.assets[x.assetId];
+        if (key === "audio" || key === "overlays") {
+          if (!validTime(x.inMs)) put(x, "inMs", 0);
+          length =
+            asset?.kind === "image"
+              ? 3000
+              : Math.round((asset?.durationMs - x.inMs) / mediaRate(x));
+        } else if (key === "events") {
+          length = positive(x.timeoutMs) ? x.timeoutMs : 4000;
+        } else length = 2000;
+        if (positive(length)) {
+          if (!["audio", "overlays"].includes(key)) {
+            if (x.startMs >= sceneEnd)
+              put(x, "startMs", Math.max(0, sceneEnd - 100));
+            length = Math.min(length, sceneEnd - x.startMs);
+          }
+          if (positive(length)) put(x, "endMs", x.startMs + length);
         }
       }
-      const a = project.assets[x.assetId];
-      if (
-        (x.kind === "video" || x === scene.video) &&
-        x.inMs === 0 &&
-        x.outMs == null &&
-        Number.isSafeInteger(a?.durationMs) &&
-        a.durationMs > 0
-      ) {
-        x.outMs = a.durationMs;
-        count++;
-      }
-    }
   }
   return count;
 }

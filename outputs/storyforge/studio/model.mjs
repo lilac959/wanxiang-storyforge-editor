@@ -19,20 +19,30 @@ export const endTarget = () => ({ kind: "end" });
 export const sceneTarget = (id) =>
   id ? { kind: "scene", sceneId: id } : endTarget();
 export function duration(scene) {
-  const overlayEnd = Math.max(0, ...(scene.overlays || []).map((c) => c.endMs));
+  const finite = (x) => (Number.isFinite(x) && x >= 0 ? x : 0);
+  const overlayEnd = Math.max(
+    0,
+    ...(scene.overlays || []).map((c) => finite(c.endMs)),
+  );
+  let visualEnd;
   if (scene.source === "sequence")
-    return Math.max(
-      scene.clips?.length ? 0 : scene.durationMs,
-      ...(scene.clips || []).map((c) => c.startMs + clipLength(c)),
-      overlayEnd,
+    visualEnd = Math.max(
+      0,
+      ...(scene.clips || []).map((c) => finite(c.startMs + clipLength(c))),
     );
+  else if (scene.source === "images")
+    visualEnd = (scene.images || []).reduce(
+      (n, f) => n + finite(f.durationMs),
+      0,
+    );
+  else
+    visualEnd = scene.video
+      ? finite(clipLength(scene.video))
+      : finite(scene.durationMs);
   return Math.max(
     overlayEnd,
-    scene.source === "images"
-      ? scene.images.reduce((n, f) => n + f.durationMs, 0)
-      : scene.video
-        ? clipLength(scene.video)
-        : scene.durationMs,
+    visualEnd,
+    visualEnd > 0 ? 0 : finite(scene.durationMs) || 8000,
   );
 }
 export function newScene(name = "新的剧情节点") {
@@ -56,6 +66,8 @@ export function newScene(name = "新的剧情节点") {
   };
 }
 export function newEvent(at = 0, kind = "qte", length = 4000) {
+  at = Number.isFinite(at) && at >= 0 ? Math.round(at) : 0;
+  length = Number.isFinite(length) && length >= 100 ? Math.round(length) : 4000;
   return {
     id: uid("event"),
     kind,
