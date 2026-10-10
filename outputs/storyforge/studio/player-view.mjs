@@ -1,7 +1,14 @@
 import { audioVolume } from "./audio-envelope.mjs";
 import { visualLayer, itemTrackId } from "./tracks.mjs";
 import { GESTURE_PATHS } from "./ui-components.mjs";
-import { mediaAt, clipLength, visualClips } from "./timeline.mjs";
+import {
+  mediaAt,
+  clipLength,
+  visualClips,
+  mediaRate,
+  sourceTime,
+  timelineTime,
+} from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
 import {
   duration,
@@ -122,7 +129,8 @@ export class PlayerView {
         }
         if (command === "sound") {
           this.muted = !this.muted;
-          if (this.video) this.video.muted = this.muted;
+          if (this.video)
+            this.video.muted = this.muted || !!this.currentClip?.audioDetached;
           for (const a of this.audio.values()) a.muted = this.muted;
           const sound = this.root.querySelector('[data-player="sound"]');
           sound.setAttribute("aria-pressed", String(!this.muted));
@@ -417,15 +425,22 @@ export class PlayerView {
     this.currentClip = current;
     this.mountedClipId = current?.id || "gap";
     if (this.video && Number.isFinite(this.video.duration)) {
-      const wanted =
-        (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
+      this.video.muted =
+        this.muted ||
+        !!this.currentClip.audioDetached ||
+        scene.role === "loading";
+      this.video.volume = this.currentClip.volume ?? 1;
+      const wanted = sourceTime(this.currentClip, time) / 1000;
       if (
         Math.abs(this.video.currentTime - wanted) >
         (this.timelinePlaying ? 0.2 : 0.03)
       )
         this.video.currentTime = Math.min(wanted, this.video.duration);
       if (this.timelinePlaying) {
-        this.video.playbackRate = this.timelineRate || 1;
+        this.video.playbackRate =
+          (this.timelineRate || 1) * mediaRate(this.currentClip);
+        this.video.preservesPitch = true;
+        this.video.muted = this.muted || !!this.currentClip.audioDetached;
         if (this.video.paused) this.video.play().catch(() => {});
       } else this.video.pause();
     }
@@ -451,10 +466,11 @@ export class PlayerView {
         audio.pause();
         continue;
       }
-      const wanted = (time - clip.startMs + clip.inMs) / 1000;
+      const wanted = sourceTime(clip, time) / 1000;
       if (audio.readyState && Math.abs(audio.currentTime - wanted) > 0.2)
         audio.currentTime = wanted;
-      audio.playbackRate = this.timelineRate || 1;
+      audio.playbackRate = (this.timelineRate || 1) * mediaRate(clip);
+      audio.preservesPitch = true;
       audio.volume = audioVolume(clip, time);
       if (audio.paused) audio.play().catch(() => {});
     }
@@ -480,7 +496,11 @@ export class PlayerView {
         const v = document.createElement("video");
         v.playsInline = true;
         v.preload = "auto";
-        v.muted = this.muted || scene.role === "loading";
+        v.muted =
+          this.muted ||
+          !!this.currentClip.audioDetached ||
+          scene.role === "loading";
+        v.volume = this.currentClip.volume ?? 1;
         if (
           scene.role === "loading" &&
           scene.opening?.image &&
@@ -519,8 +539,7 @@ export class PlayerView {
         if (token !== this.token) return;
         if (current.outMs > v.duration * 1000 + 100)
           throw Error("视频时长短于节点设置，请检查素材与出点");
-        v.currentTime =
-          (this.currentClip.inMs + time - this.currentClip.startMs) / 1000;
+        v.currentTime = sourceTime(this.currentClip, time) / 1000;
         v.onerror = () => {
           if (token === this.token)
             this.showError("视频播放中断，请重新加载当前节点");
@@ -623,8 +642,7 @@ export class PlayerView {
         mediaAt(runtime.scene, runtime.timeMs)?.id === this.currentClip?.id
       )
         this.video.currentTime =
-          (this.currentClip.inMs + runtime.timeMs - this.currentClip.startMs) /
-          1000;
+          sourceTime(this.currentClip, runtime.timeMs) / 1000;
       this.cancel();
       this.eventId = null;
     }
@@ -705,21 +723,23 @@ export class PlayerView {
     const r = this.runtime;
     if (!r || this.loading || r.state !== "playing") return;
     if (this.video) {
-      this.video.playbackRate = r.rate;
+      this.video.playbackRate = r.rate * mediaRate(this.currentClip);
+      this.video.preservesPitch = true;
+      this.video.muted =
+        this.muted ||
+        !!this.currentClip.audioDetached ||
+        r.scene.role === "loading";
       if (r.mediaPaused || r.timeMs >= duration(r.scene)) {
         this.video.pause();
         if (
           r.active?.event.pause &&
           Math.abs(
-            this.video.currentTime * 1000 -
-              this.currentClip.inMs +
-              this.currentClip.startMs -
+            timelineTime(this.currentClip, this.video.currentTime * 1000) -
               r.timeMs,
           ) > 100
         )
           this.video.currentTime =
-            (this.currentClip.inMs + r.timeMs - this.currentClip.startMs) /
-            1000;
+            sourceTime(this.currentClip, r.timeMs) / 1000;
       } else if (this.video.paused && !this.playAttempt) {
         this.playAttempt = true;
         try {
@@ -760,13 +780,14 @@ export class PlayerView {
         a.pause();
         continue;
       }
-      const wanted = (r.timeMs - clip.startMs + clip.inMs) / 1000;
+      const wanted = sourceTime(clip, r.timeMs) / 1000;
       if (
         Number.isFinite(a.duration) &&
         Math.abs(a.currentTime - wanted) > 0.15
       )
         a.currentTime = wanted;
-      a.playbackRate = r.rate;
+      a.playbackRate = r.rate * mediaRate(clip);
+      a.preservesPitch = true;
       a.volume = audioVolume(clip, r.timeMs);
       if (a.paused) a.play().catch(() => {});
     }
@@ -977,9 +998,12 @@ export class PlayerView {
     }
     for (const el of host.querySelectorAll("video")) {
       const x = list.find((x) => x.id === el.dataset.overlayId);
-      const wanted = (time - x.startMs + (x.inMs || 0)) / 1000;
+      const wanted = sourceTime(x, time) / 1000;
       el.dataset.wanted = wanted;
-      el.muted = (this.editing && !this.timelinePlaying) || this.muted;
+      el.muted =
+        (this.editing && !this.timelinePlaying) ||
+        this.muted ||
+        !!x.audioDetached;
       el.volume = clamp(x.volume ?? 1, 0, 1);
       if (el.readyState && Math.abs(el.currentTime - wanted) > 0.12)
         el.currentTime = wanted;
@@ -987,9 +1011,10 @@ export class PlayerView {
         this.timelinePlaying ||
         (!this.editing && this.runtime?.playing && !this.runtime.mediaPaused)
       ) {
-        el.playbackRate = this.timelinePlaying
-          ? this.timelineRate || 1
-          : this.runtime.rate;
+        el.playbackRate =
+          (this.timelinePlaying ? this.timelineRate || 1 : this.runtime.rate) *
+          mediaRate(x);
+        el.preservesPitch = true;
         if (el.paused) el.play().catch(() => {});
       } else el.pause();
     }
@@ -1062,9 +1087,7 @@ export class PlayerView {
         dt,
         this.video && this.currentClip
           ? Math.min(
-              this.video.currentTime * 1000 -
-                this.currentClip.inMs +
-                this.currentClip.startMs,
+              timelineTime(this.currentClip, this.video.currentTime * 1000),
               this.currentClip.startMs + clipLength(this.currentClip),
             )
           : null,

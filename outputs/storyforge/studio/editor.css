@@ -2742,3 +2742,26 @@ body[data-view="scene"] .timeline-head {
   width: min(844px, 100vw);
   height: min(390px, 100dvh, calc(100vw * 390 / 844));
 }
+
+.clip.invalid-time {
+  background: repeating-linear-gradient(
+    135deg,
+    #fff3df,
+    #fff3df 8px,
+    #ffe5bc 8px,
+    #ffe5bc 16px
+  );
+  border: 1px dashed #c78628;
+}
+.speed-settings input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent, #7960ef);
+}
+.clip {
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+.clip:active {
+  cursor: grabbing;
+}

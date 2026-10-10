@@ -158,7 +158,6 @@ export class AssetLibrary {
         this.category === "text"
           ? [["add-subtitle", "普通字幕", "Aa", "可修改文字、位置和样式"]]
           : [
-              ["add-speed", "播放速度", "0.5×", "设置区间内的播放倍速"],
               ["add-bars", "电影黑边", "▰", "添加上下黑边"],
             ];
       grid.innerHTML = templates

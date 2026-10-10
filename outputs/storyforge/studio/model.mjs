@@ -1,4 +1,4 @@
-import { visualClips, clipLength } from "./timeline.mjs";
+import { visualClips, clipLength, mediaRate } from "./timeline.mjs";
 export const SCHEMA = 3;
 export const clone = (value) => structuredClone(value);
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
@@ -31,7 +31,7 @@ export function duration(scene) {
     scene.source === "images"
       ? scene.images.reduce((n, f) => n + f.durationMs, 0)
       : scene.video
-        ? scene.video.outMs - scene.video.inMs
+        ? clipLength(scene.video)
         : scene.durationMs,
   );
 }
@@ -573,7 +573,11 @@ export function validate(p, { publish = false } = {}) {
     return issues;
   }
   for (const pos of Object.values(p.editor.positions))
-    if (!pos || !finite(pos.x, -100000, 100000) || !finite(pos.y, -100000, 100000)) {
+    if (
+      !pos ||
+      !finite(pos.x, -100000, 100000) ||
+      !finite(pos.y, -100000, 100000)
+    ) {
       error("剧情地图位置无效", null, "structure");
       return issues;
     }
@@ -827,6 +831,7 @@ export function validate(p, { publish = false } = {}) {
           clipLength(c) < 100
         )
           error("画面片段时间无效", s.id);
+        if (!finite(mediaRate(c), 0.25, 4)) error("视频倍速无效", s.id);
         if (c.startMs < end) error("主画面片段不能重叠", s.id);
         end = c.startMs + clipLength(c);
         if (
@@ -922,7 +927,8 @@ export function validate(p, { publish = false } = {}) {
       if (
         overlayAsset?.kind === "video" &&
         (!integer(x.inMs ?? 0) ||
-          (x.inMs ?? 0) + x.endMs - x.startMs > overlayAsset.durationMs)
+          (x.inMs ?? 0) + (x.endMs - x.startMs) * mediaRate(x) >
+            overlayAsset.durationMs)
       )
         error("叠加视频截取超过素材时长", s.id);
       if (overlayAsset?.kind === "video" && !finite(x.volume ?? 1, 0, 1))
@@ -973,11 +979,15 @@ export function validate(p, { publish = false } = {}) {
         return issues;
       }
       interval(x, "音频");
-      ref(x.assetId, s.id, "audio");
+      ref(x.assetId, s.id, x.detachedFrom ? "video" : "audio");
+      if (!finite(mediaRate(x), 0.25, 4)) error("音频倍速无效", s.id);
       if (!integer(x.inMs) || !finite(x.volume, 0, 1))
         error("音频入点或音量无效", s.id);
       const a = p.assets[x.assetId];
-      if (a?.durationMs && x.inMs + x.endMs - x.startMs > a.durationMs + 100)
+      if (
+        a?.durationMs &&
+        x.inMs + (x.endMs - x.startMs) * mediaRate(x) > a.durationMs + 100
+      )
         error("音频范围超过素材时长", s.id);
     }
     for (const x of s.effects) {

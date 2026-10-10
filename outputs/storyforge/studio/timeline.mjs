@@ -1,6 +1,11 @@
 // Timeline operations shared by the editor and player. Times are integer milliseconds.
 const id = () => `clip-${crypto.randomUUID()}`;
-export const clipLength = (c) => c.outMs - c.inMs;
+export const mediaRate = (c) => c?.playbackRate ?? 1;
+export const clipLength = (c) => Math.round((c.outMs - c.inMs) / mediaRate(c));
+export const sourceTime = (c, time) =>
+  (c.inMs || 0) + (time - (c.startMs || 0)) * mediaRate(c);
+export const timelineTime = (c, time) =>
+  c.startMs + (time - c.inMs) / mediaRate(c);
 export function visualClips(s) {
   if (s.source === "sequence") return s.clips || [];
   if (s.source === "video")
@@ -75,7 +80,9 @@ export function liftVisual(scene, cid, at) {
     x: 50,
     y: 50,
     width: 35,
-    volume: 1,
+    volume: c.volume ?? 1,
+    playbackRate: mediaRate(c),
+    audioDetached: c.audioDetached || false,
   };
   for (const child of linked(scene, cid)) {
     child.startMs += delta;
@@ -114,7 +121,12 @@ export function splitClip(s, cid, time) {
   const offset = Math.round(time) - c.startMs;
   if (offset < 100 || offset > clipLength(c) - 100)
     throw Error("请把播放头放在片段内部（两侧至少 0.1 秒）");
-  const right = { ...c, id: id(), startMs: time, inMs: c.inMs + offset };
+  const right = {
+    ...c,
+    id: id(),
+    startMs: time,
+    inMs: Math.round(c.inMs + offset * mediaRate(c)),
+  };
   c.outMs = right.inMs;
   clips.splice(clips.indexOf(c) + 1, 0, right);
   for (const x of linked(s, cid))
@@ -274,11 +286,11 @@ export function trimVisual(scene, cid, edge, delta, sourceDuration = 7200000) {
     );
     const change = Math.max(
       previous - c.startMs,
-      -c.inMs,
+      Math.ceil(-c.inMs / mediaRate(c)),
       Math.min(delta, clipLength(c) - 100),
     );
     c.startMs += change;
-    c.inMs += change;
+    c.inMs = Math.round(c.inMs + change * mediaRate(c));
   } else {
     const next = Math.min(
       Infinity,
@@ -287,8 +299,14 @@ export function trimVisual(scene, cid, edge, delta, sourceDuration = 7200000) {
         .map((x) => x.startMs),
     );
     c.outMs = Math.max(
-      c.inMs + 100,
-      Math.min(c.outMs + delta, sourceDuration, c.inMs + next - c.startMs),
+      c.inMs + Math.ceil(100 * mediaRate(c)),
+      Math.round(
+        Math.min(
+          c.outMs + delta * mediaRate(c),
+          sourceDuration,
+          c.inMs + (next - c.startMs) * mediaRate(c),
+        ),
+      ),
     );
   }
 }

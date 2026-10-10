@@ -24,7 +24,11 @@ export function trackRows(scene) {
           (t) =>
             t.kind === family &&
             t.items.length &&
-            t.items.every((x) => x.itemKind === kind),
+            t.items.every((x) => x.itemKind === kind) &&
+            (kind !== "event" ||
+              t.items.every(
+                (x) => !(item.startMs < x.endMs && item.endMs > x.startMs),
+              )),
         );
         // Reuse only the top matching lane: using a lower free lane would
         // incorrectly put a later legacy overlay behind an earlier one.
@@ -90,9 +94,19 @@ export function assignTrack(scene, kind, item, preferredId) {
   const family = kind === "subtitle" || kind === "overlay" ? "visual" : kind;
   const tracks = materializeTracks(scene);
   const effectiveId = preferredId || item.trackId;
-  const row = trackRows(scene).find(
+  let row = trackRows(scene).find(
     (r) => r.id === effectiveId && r.kind === family,
   );
+  if (!row && family === "event")
+    row = trackRows(scene).find(
+      (r) =>
+        r.kind === "event" &&
+        r.items.every(
+          (x) =>
+            x.id === item.id ||
+            !(item.startMs < x.endMs && item.endMs > x.startMs),
+        ),
+    );
   const overlaps = row?.items.some(
     (x) => x.id !== item.id && item.startMs < x.endMs && item.endMs > x.startMs,
   );
@@ -117,6 +131,57 @@ export function assignTrack(scene, kind, item, preferredId) {
     item.trackId = track.id;
   }
   return item.trackId;
+}
+
+// Pack interactions into the fewest rows; locked rows retain their members.
+export function consolidateInteractionTracks(
+  scene,
+  { force = false, locked = new Set() } = {},
+) {
+  if (!force && scene.interactionTracksVersion === 1) return false;
+  const rows = (scene.timelineTracks || [])
+    .filter((r) => r.kind === "event")
+    .map((r) => ({ ...r, items: [] }));
+  for (const item of scene.events || []) {
+    if (!locked.has(item.trackId)) continue;
+    let row = rows.find((r) => r.id === item.trackId);
+    if (!row) {
+      row = { id: item.trackId, kind: "event", name: "互动", items: [] };
+      rows.push(row);
+    }
+    row.items.push(item);
+  }
+  for (const item of [...(scene.events || [])].sort(
+    (a, b) => a.startMs - b.startMs,
+  )) {
+    if (locked.has(item.trackId)) continue;
+    let row = rows.find(
+      (r) =>
+        !locked.has(r.id) &&
+        r.items.every(
+          (x) => !(item.startMs < x.endMs && item.endMs > x.startMs),
+        ),
+    );
+    if (!row) {
+      row = {
+        id: `event-row-${crypto.randomUUID()}`,
+        kind: "event",
+        name: "互动",
+        items: [],
+      };
+      rows.push(row);
+    }
+    item.trackId = row.id;
+    row.items.push(item);
+  }
+  scene.timelineTracks = [
+    ...rows
+      .filter((r) => r.items.length || locked.has(r.id))
+      .map(({ items, ...r }) => r),
+    ...(scene.timelineTracks || []).filter((r) => r.kind !== "event"),
+  ];
+  scene.interactionTracksVersion = 1;
+  return true;
 }
 export function reorderTrack(scene, trackId, step) {
   const rows = materializeTracks(scene),

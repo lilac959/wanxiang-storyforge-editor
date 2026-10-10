@@ -1,3 +1,10 @@
+import {
+  setMediaSpeed,
+  separateAudio,
+  repairTimelineData,
+  migrateLegacySpeed,
+  splitRange,
+} from "./media-editing.mjs";
 import { timelineThumbnail, audioWaveform } from "./timeline-media.mjs";
 import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
 import {
@@ -11,6 +18,7 @@ import {
   reorderTrack,
   interactionConflicts,
   materializeTracks,
+  consolidateInteractionTracks,
 } from "./tracks.mjs";
 const trackPreview = new Map();
 function previewTracks() {
@@ -38,6 +46,7 @@ import { copyScenes, deleteScenes } from "./graph-commands.mjs";
 import {
   visualClips,
   clipLength,
+  mediaRate,
   mediaAt,
   ensureSequence,
   appendVisual,
@@ -190,7 +199,14 @@ function mutate(label, fn) {
     history.commit(label, (project) => {
       for (const scene of project.scenes) materializeTracks(scene);
       fn(project);
-      for (const scene of project.scenes) materializeTracks(scene);
+      for (const scene of project.scenes) {
+        consolidateInteractionTracks(scene, {
+          force: true,
+          locked:
+            trackPreview.get(project.id + ":" + scene.id)?.locked || new Set(),
+        });
+        materializeTracks(scene);
+      }
     });
   } catch (error) {
     notify(error.message);
@@ -344,7 +360,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
   setupEditingLayout();
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
@@ -552,7 +568,9 @@ function items() {
         kind: "clip",
         start: c.startMs,
         end: c.startMs + clipLength(c),
-        label: p().assets[c.assetId]?.name || "画面",
+        label:
+          (p().assets[c.assetId]?.name || "画面") +
+          (mediaRate(c) !== 1 ? ` · ${mediaRate(c)}×` : ""),
       });
   } else if (scene.source === "images") {
     let start = 0;
@@ -694,7 +712,7 @@ function renderTimeline() {
                 )
                 .join("")
             : ""
-        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${x.kind === "event" ? "fixed-duration" : ""} ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 固定时长，整体拖动调整出现位置" : ""}">${x.kind === "event" ? '<span class="interaction-clip-icon" aria-hidden="true">◇</span>' : '<i class="handle left" data-edge="left"></i>'}<span class="clip-name">${esc(x.label)}</span>${x.kind === "event" ? "" : '<i class="handle right" data-edge="right"></i>'}</div>`).join("")}</div></div>`;
+        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${validTimelineEntry(x) ? "" : "invalid-time"} ${x.kind === "event" ? "fixed-duration" : ""} ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 固定时长，整体拖动调整出现位置" : ""}">${x.kind === "event" ? '<span class="interaction-clip-icon" aria-hidden="true">◇</span>' : '<i class="handle left" data-edge="left"></i>'}<span class="clip-name">${esc(x.label)}${validTimelineEntry(x) ? "" : " · 时间待补全"}</span>${x.kind === "event" ? "" : '<i class="handle right" data-edge="right"></i>'}</div>`).join("")}</div></div>`;
       })
       .join(
         "",
@@ -714,9 +732,7 @@ function updatePlayhead() {
     ? visualClips(s()).find((x) => x.id === selection.id)
     : null;
   const button = $('.timeline-head [data-action="split-clip"]');
-  if (button)
-    button.disabled =
-      !c || time <= c.startMs || time >= c.startMs + clipLength(c);
+  if (button) button.disabled = !canSplitSelected();
 }
 function renderInspector() {
   const panel = $(".inspector"),
@@ -774,6 +790,17 @@ function renderInspectorContent() {
       seconds("节点开始（秒）", "startMs", obj.startMs) +
       seconds("素材入点（秒）", "inMs", obj.inMs) +
       seconds("素材出点（秒）", "outMs", obj.outMs) +
+      (obj.kind === "video"
+        ? speedFields(obj, "clip") +
+          (obj.audioDetached
+            ? '<p class="audio-state">音频已分离</p>'
+            : field("视频原声音量", "volume", obj.volume ?? 1, {
+                type: "number",
+                min: 0,
+                max: 1,
+                step: 0.05,
+              }))
+        : "") +
       '<div class="mini-actions"><button data-action="clip-before">前移</button><button data-action="clip-after">后移</button><button data-action="split-clip">分割</button><button data-action="copy-item">复制</button><button data-action="delete-item">删除</button></div>';
   } else if (page === "story" && selection.kind === "overlay") {
     html =
@@ -788,6 +815,9 @@ function renderInspectorContent() {
             max: 1,
             step: 0.05,
           })
+        : "") +
+      (p().assets[obj.assetId]?.kind === "video"
+        ? speedFields(obj, "overlay")
         : "") +
       field("横向位置 %", "x", obj.x, { type: "number", min: 0, max: 100 }) +
       field("纵向位置 %", "y", obj.y, { type: "number", min: 0, max: 100 }) +
@@ -942,7 +972,11 @@ function renderInspectorContent() {
         field("使用音频", "assetId", obj.assetId, {
           options: Object.fromEntries(
             Object.values(p().assets)
-              .filter((a) => a.kind === "audio")
+              .filter(
+                (a) =>
+                  a.kind === "audio" ||
+                  (obj.detachedFrom && a.id === obj.assetId),
+              )
               .map((a) => [a.id, a.name]),
           ),
         }) +
@@ -954,9 +988,13 @@ function renderInspectorContent() {
           step: 0.05,
         }) +
         seconds("淡入时长（秒）", "fadeInMs", obj.fadeInMs || 0) +
-        seconds("淡出时长（秒）", "fadeOutMs", obj.fadeOutMs || 0);
+        seconds("淡出时长（秒）", "fadeOutMs", obj.fadeOutMs || 0) +
+        speedFields(obj, "audio");
     if (selection.kind === "effect")
       html +=
+        (obj.kind === "speed"
+          ? '<p class="legacy-speed-note">此旧版慢放区间尚未自动转换，请确认范围后删除区间，并在对应视频的「变速」中设置。</p>'
+          : "") +
         field("效果", "kind", obj.kind, {
           options: { speed: "播放速度 / 慢放", bars: "电影黑边" },
         }) +
@@ -1309,6 +1347,7 @@ async function adopt(project, revision = "none", backup = true) {
   storage.saveLocal(project);
   dirty = false;
   render();
+  autoRepairTimeline();
 }
 async function boot() {
   let project,
@@ -1350,7 +1389,10 @@ async function boot() {
   if (!idleWorkspace) storage.saveLocal(project);
   render();
   if (idleWorkspace) await showProjects();
-  else status("已保存到本机");
+  else {
+    status("已保存到本机");
+    autoRepairTimeline();
+  }
 }
 async function preview({ full = false, here = false } = {}) {
   stopTimelinePlayback();
@@ -2388,6 +2430,43 @@ async function handleAction(action, button) {
       );
       $("#panel").close();
       break;
+    case "reset-speed":
+      assertTimelineUnlocked();
+      mutate("恢复正常速度", () =>
+        setMediaSpeed(s(), selectObject(), 1, selection.kind),
+      );
+      break;
+    case "detach-audio": {
+      assertTimelineUnlocked();
+      const projectId = p().id,
+        sceneId = selected,
+        id = selection.id;
+      const clip = currentClip();
+      if (!clip || clip.kind !== "video") throw Error("请选择视频片段");
+      if (clip.audioDetached) throw Error("此片段的音频已分离");
+      notify("正在读取视频音轨…");
+      try {
+        await audioWaveform(await assets.url(p().assets[clip.assetId]), 0, 100);
+      } catch {
+        throw Error(
+          "未读取到可分离音轨：视频可能没有声音，或浏览器不支持该音频格式",
+        );
+      }
+      if (p().id !== projectId || selected !== sceneId) return;
+      assertTimelineUnlocked(new Set([id]));
+      mutate("分离音频", () => {
+        const original = ensureSequence(s()).find((c) => c.id === id);
+        if (original?.assetId !== clip.assetId)
+          throw Error("视频素材已更换，请重新分离音频");
+        const audio = separateAudio(s(), original);
+        assignTrack(s(), "audio", audio);
+        selection = { kind: "audio", id: audio.id };
+        timelineSelection.clear();
+      });
+      revealTimelineItem(selection.id);
+      notify("音频已分离，可在音频轨道独立编辑");
+      break;
+    }
     case "lift-selected":
       mutate("提到叠加轨道", () => {
         const c = currentClip();
@@ -2641,8 +2720,11 @@ function snappedTime(value, exclude, width, alt = false) {
     time,
     ...(s().markers || []).map((x) => x.timeMs),
     ...items()
-      .filter((x) => x.id !== exclude)
-      .flatMap((x) => [x.start, x.end]),
+      .filter((x) =>
+        exclude instanceof Set ? !exclude.has(x.id) : x.id !== exclude,
+      )
+      .flatMap((x) => [x.start, x.end])
+      .filter(Number.isFinite),
   ];
   const nearest = points.sort(
     (a, b) => Math.abs(value - a) - Math.abs(value - b),
@@ -2894,6 +2976,7 @@ function beginTimelineGroupDrag(e) {
   const controller = new AbortController();
   let delta = 0,
     moved = false;
+  startDragAutoScroll(e, controller.signal);
   const cleanup = () => {
     controller.abort();
     cancelTimelineGesture = null;
@@ -2911,9 +2994,10 @@ function beginTimelineGroupDrag(e) {
         ((ev.clientX - e.clientX + scroll.scrollLeft - initialScroll) /
           lane.width) *
         timelineSpan();
+      const origin = Math.min(...entries.map((x) => x.start));
       delta = Math.max(
-        -Math.min(...entries.map((x) => x.start)),
-        Math.round(raw),
+        -origin,
+        snappedTime(origin + raw, ids, lane.width, ev.altKey) - origin,
       );
       for (const x of entries) {
         const clip = [...scroll.querySelectorAll("[data-clip]")].find(
@@ -2923,8 +3007,6 @@ function beginTimelineGroupDrag(e) {
           clip.style.left = ((x.start + delta) / timelineSpan()) * 100 + "%";
       }
       const bounds = scroll.getBoundingClientRect();
-      if (ev.clientX > bounds.right - 25) scroll.scrollLeft += 12;
-      if (ev.clientX < bounds.left + 85) scroll.scrollLeft -= 12;
     },
     { signal: controller.signal },
   );
@@ -2959,6 +3041,7 @@ function timelinePointer(e) {
   ) {
     selection = { kind: clip.dataset.kind, id: clip.dataset.clip };
     renderInspector();
+    notify("轨道已锁定，解锁后可拖动");
     return;
   }
   stopTimelinePlayback();
@@ -3013,7 +3096,13 @@ function timelinePointer(e) {
     !Number.isFinite(entry.end) ||
     entry.end <= entry.start
   ) {
-    notify("这个片段的时间需要先修复，请在右侧填写有效时间或打开作品检查");
+    notify("此片段的时间待补全，右侧已显示缺失项；其他片段可正常编辑");
+    propertyTabs.set(
+      `${selected}:${selection.kind}:${selection.id}`,
+      selection.kind === "event" ? "interaction" : "timing",
+    );
+    renderInspector();
+    autoRepairTimeline();
     return;
   }
   const rect = clip.parentElement.getBoundingClientRect(),
@@ -3030,6 +3119,7 @@ function timelinePointer(e) {
   guide.className = "timeline-snap";
   clip.parentElement.append(guide);
   const anchor = edge === "right" ? source.end : source.start;
+  startDragAutoScroll(e, controller.signal);
   window.addEventListener(
     "pointermove",
     (ev) => {
@@ -3101,7 +3191,7 @@ function timelinePointer(e) {
             p().assets[obj.assetId]?.kind === "video");
         if (edge === "left")
           lo = Math.max(
-            media ? before.startMs - (before.inMs || 0) : 0,
+            media ? before.startMs - (before.inMs || 0) / mediaRate(before) : 0,
             Math.min(before.endMs - min, lo),
           );
         else if (edge === "right")
@@ -3112,15 +3202,26 @@ function timelinePointer(e) {
               ? Math.min(
                   d,
                   before.startMs +
-                    p().assets[obj.assetId].durationMs -
-                    (before.inMs || 0),
+                    (p().assets[obj.assetId].durationMs - (before.inMs || 0)) /
+                      mediaRate(before),
                 )
               : d,
           );
         else {
-          lo = clamp(lo, 0, d - (source.end - source.start));
+          lo = Math.max(0, lo);
           hi = lo + source.end - source.start;
         }
+      }
+      if (
+        !edge &&
+        selection.kind === "clip" &&
+        (!dropRow || dropRow.dataset.track === "video")
+      ) {
+        const draft = clone(s());
+        moveVisual(draft, obj.id, lo);
+        const projected = draft.clips.find((x) => x.id === obj.id);
+        lo = projected.startMs;
+        hi = lo + clipLength(projected);
       }
       delta = edge === "right" ? hi - source.end : lo - source.start;
       target = anchor + delta;
@@ -3132,8 +3233,6 @@ function timelinePointer(e) {
         (lo / 1000).toFixed(2) + " — " + (hi / 1000).toFixed(2) + " 秒";
       const scroller = $(".timeline-scroll"),
         bounds = scroller.getBoundingClientRect();
-      if (ev.clientX > bounds.right - 25) scroller.scrollLeft += 12;
-      if (ev.clientX < bounds.left + 85) scroller.scrollLeft -= 12;
     },
     { signal: controller.signal },
   );
@@ -3181,7 +3280,7 @@ function timelinePointer(e) {
             );
           else moveVisual(s(), obj.id, before.startMs + delta);
         } else {
-          const d = duration(s()),
+          const d = editableDuration(),
             min = selection.kind === "event" ? 0 : 100;
           if (edge === "left") {
             obj.startMs = clamp(before.startMs + delta, 0, before.endMs - min);
@@ -3191,11 +3290,11 @@ function timelinePointer(e) {
                 p().assets[obj.assetId]?.kind === "video")
             ) {
               const change = Math.max(
-                -before.inMs,
+                -before.inMs / mediaRate(before),
                 obj.startMs - before.startMs,
               );
               obj.startMs = before.startMs + change;
-              obj.inMs = before.inMs + change;
+              obj.inMs = Math.round(before.inMs + change * mediaRate(before));
             }
           } else if (edge === "right") {
             const limit =
@@ -3205,8 +3304,8 @@ function timelinePointer(e) {
                 ? Math.min(
                     d,
                     before.startMs +
-                      p().assets[obj.assetId].durationMs -
-                      before.inMs,
+                      (p().assets[obj.assetId].durationMs - before.inMs) /
+                        mediaRate(before),
                   )
                 : d;
             obj.endMs = clamp(
@@ -3216,7 +3315,7 @@ function timelinePointer(e) {
             );
           } else {
             const length = before.endMs - before.startMs;
-            obj.startMs = clamp(before.startMs + delta, 0, d - length);
+            obj.startMs = Math.max(0, before.startMs + delta);
             obj.endMs = obj.startMs + length;
           }
           if (
@@ -3261,7 +3360,11 @@ function timelineKey(e) {
     else if (selection.kind === "image")
       obj.durationMs = Math.max(100, obj.durationMs + delta);
     else if (selection.kind === "video")
-      obj.inMs = clamp(obj.inMs + delta, 0, obj.outMs - 100);
+      obj.inMs = clamp(
+        obj.inMs + delta * mediaRate(obj),
+        0,
+        obj.outMs - 100 * mediaRate(obj),
+      );
     else {
       const length = obj.endMs - obj.startMs;
       obj.startMs = clamp(obj.startMs + delta, 0, duration(s()) - length);
@@ -3508,7 +3611,7 @@ document.addEventListener("change", (e) => {
   let value =
     el.type === "checkbox"
       ? el.checked
-      : el.type === "number"
+      : ["number", "range"].includes(el.type)
         ? Number(el.value)
         : el.value;
   if (el.hasAttribute("data-ms")) value = ms(value);
@@ -3532,6 +3635,12 @@ document.addEventListener("change", (e) => {
           `<h2>改为${value === "loading" ? "加载" : "开屏"}节点？</h2><p>${other && other.id !== selected ? `原${value === "loading" ? "加载" : "开屏"}节点“${esc(other.name)}”将改为剧情，内容保留。` : ""}${s().events.length ? "已有互动和分支暂时停用，改回剧情后可恢复。" : ""}${selected === p().entryId ? "起始节点将改为另一张剧情节点。" : ""}</p><button data-action="confirm-role">确认修改</button><button data-action="close-panel">取消</button>`,
         );
       } else mutate("修改节点用途", (p) => changeRole(p, selected, value));
+      return;
+    }
+    if (path === "playbackRate") {
+      mutate("调整倍速", () =>
+        setMediaSpeed(s(), obj, Number(value), selection.kind),
+      );
       return;
     }
     mutate("修改属性", () => {
@@ -4639,6 +4748,15 @@ async function workspaceAction(action, button = { dataset: {} }) {
     case "split-clip": {
       assertTimelineUnlocked();
       let next;
+      if (["audio", "subtitle", "overlay"].includes(selection.kind)) {
+        const kind = selection.kind;
+        mutate("分割片段", () => {
+          next = splitRange(s(), selectObject(), kind, time);
+        });
+        selection = { kind, id: next.id };
+        render();
+        break;
+      }
       mutate("分割片段", () => {
         const c = currentClip();
         if (!c) throw Error("请选择片段");
@@ -5277,11 +5395,7 @@ function timelineContext(e) {
     clip.closest(".track").dataset.trackId,
   );
   const actions = [
-    [
-      "split-clip",
-      "分割",
-      !c || time <= c.startMs || time >= c.startMs + clipLength(c),
-    ],
+    ["split-clip", "分割", !canSplitSelected()],
     ["copy-item", "复制", selection.kind === "opening"],
     ["delete-item", "删除", false],
     ["align-start", "开始位置对齐播放头", selection.kind === "opening"],
@@ -5291,6 +5405,15 @@ function timelineContext(e) {
       ["opening", "event"].includes(selection.kind),
     ],
     ...(main ? [["lift-selected", "提到叠加轨道", false]] : []),
+    ...(c?.kind === "video"
+      ? [
+          [
+            "detach-audio",
+            c.audioDetached ? "音频已分离" : "分离音频",
+            !!c.audioDetached,
+          ],
+        ]
+      : []),
   ];
   const menu = document.createElement("div");
   menu.className = "timeline-context";
@@ -5444,9 +5567,18 @@ function organizeProperties(panel) {
       : type === "subtitle"
         ? { appearance: "文本与样式", timing: "时间" }
         : type === "audio"
-          ? { audio: "音频", timing: "时间" }
+          ? { audio: "音频", timing: "时间", speed: "变速" }
           : ["clip", "video", "image", "overlay"].includes(type)
-            ? { appearance: "画面", timing: "时间", audio: "音频" }
+            ? {
+                appearance: "画面",
+                timing: "时间",
+                audio: "音频",
+                ...(selectObject()?.kind === "video" ||
+                (type === "overlay" &&
+                  p().assets[selectObject()?.assetId]?.kind === "video")
+                  ? { speed: "变速" }
+                  : {}),
+              }
             : null;
   if (!labels) return;
   const groups = Object.fromEntries(
@@ -5458,6 +5590,7 @@ function organizeProperties(panel) {
     }),
   );
   const classify = (path) => {
+    if (path === "playbackRate") return "speed";
     if (type === "event") {
       if (
         /^(success|failure|condition|linkedClipId)(\.|$)|^options\.\d+\.(target|actions|condition)/.test(
@@ -5501,6 +5634,14 @@ function organizeProperties(panel) {
       node.matches('[data-action="delete-item"]')
     ) {
       extras.push(node);
+      return;
+    }
+    if (node.classList.contains("speed-settings")) {
+      groups.speed?.append(node);
+      return;
+    }
+    if (node.classList.contains("audio-state")) {
+      groups.audio?.append(node);
       return;
     }
     const fields = [...node.querySelectorAll("[data-field]")];
@@ -5645,7 +5786,7 @@ async function paintTimelineMedia() {
           waveform = await audioWaveform(
             url,
             item.inMs || 0,
-            item.endMs - item.startMs,
+            (item.endMs - item.startMs) * mediaRate(item),
           );
         if (!el.isConnected) continue;
         if (waveform) {
@@ -5749,4 +5890,84 @@ function fixInspectorHeader() {
     else body.append(el);
   }
   host.replaceChildren(header, body);
+}
+
+function validTimelineEntry(x) {
+  return Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start;
+}
+function speedFields(item, kind) {
+  const rate = mediaRate(item),
+    length = kind === "clip" ? clipLength(item) : item.endMs - item.startMs;
+  return `<section class="speed-settings"><h3>常规变速</h3><label class="field">倍速<input type="range" min="0.25" max="4" step="0.05" value="${rate}" data-field="playbackRate" data-scope="selection" aria-label="倍速滑杆"></label>${field("播放倍数", "playbackRate", rate, { type: "number", min: 0.25, max: 4, step: 0.05 })}<p>${Number.isFinite(length) ? `${((length * rate) / 1000).toFixed(2)} 秒 → ${(length / 1000).toFixed(2)} 秒` : "时间待补全"}</p><button data-action="reset-speed">恢复 1×</button></section>`;
+}
+let repairingTimeline = false;
+async function autoRepairTimeline() {
+  if (repairingTimeline || idleWorkspace) return;
+  repairingTimeline = true;
+  const before = JSON.stringify(p()),
+    projectId = p().id;
+  try {
+    const result = await repairTechnicalData(p(), async (a) =>
+      inspect(await assets.url(a), a.kind),
+    );
+    repairTimelineData(result.project);
+    migrateLegacySpeed(result.project);
+    for (const scene of result.project.scenes)
+      consolidateInteractionTracks(scene);
+    if (p().id !== projectId || JSON.stringify(p()) !== before) return;
+    if (JSON.stringify(result.project) !== before) {
+      storage.backup(p(), "时间轴整理前");
+      mutate("自动恢复时间与整理轨道", () =>
+        Object.assign(p(), result.project),
+      );
+    }
+  } catch (error) {
+    console.warn("Timeline recovery:", error.message);
+  } finally {
+    repairingTimeline = false;
+  }
+}
+function startDragAutoScroll(initial, signal) {
+  const scroller = $(".timeline-scroll");
+  let pointer = {
+      clientX: initial.clientX,
+      clientY: initial.clientY,
+      altKey: initial.altKey,
+    },
+    frame;
+  window.addEventListener(
+    "pointermove",
+    (e) => {
+      pointer = { clientX: e.clientX, clientY: e.clientY, altKey: e.altKey };
+    },
+    { signal },
+  );
+  const tick = () => {
+    if (signal.aborted) return;
+    const rect = scroller.getBoundingClientRect(),
+      old = scroller.scrollLeft;
+    if (pointer.clientX > rect.right - 30) scroller.scrollLeft += 14;
+    else if (pointer.clientX < rect.left + 90) scroller.scrollLeft -= 14;
+    if (old !== scroller.scrollLeft)
+      window.dispatchEvent(
+        new PointerEvent("pointermove", { ...pointer, buttons: 1 }),
+      );
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  signal.addEventListener("abort", () => cancelAnimationFrame(frame), {
+    once: true,
+  });
+}
+
+function canSplitSelected() {
+  if (["event", "opening", "effect", "scene"].includes(selection.kind))
+    return false;
+  const entry = items().find((x) => x.id === selection.id);
+  return (
+    !!entry &&
+    validTimelineEntry(entry) &&
+    time - entry.start >= 100 &&
+    entry.end - time >= 100
+  );
 }
