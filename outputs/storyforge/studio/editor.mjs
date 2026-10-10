@@ -185,7 +185,7 @@ function status(state, detail) {
   );
   el.textContent =
     {
-      local: storage.token ? "待同步" : "已保存到本机",
+      local: storage.cloudEnabled ? "待同步" : "已保存到本机",
       saving: "保存中…",
       saved: "已同步云端",
       upload: `↑ ${detail?.name || "素材"} · ${detail?.progress || 0}%`,
@@ -224,7 +224,7 @@ function changed() {
   }
   render();
   clearTimeout(saveTimer);
-  if (storage.token && !busy) saveTimer = setTimeout(sync, 1200);
+  if (storage.cloudEnabled && !busy) saveTimer = setTimeout(sync, 1200);
 }
 async function sync() {
   if (idleWorkspace) return;
@@ -234,7 +234,7 @@ async function sync() {
     status("● 已保留本机草稿 · 请修正配置");
     return;
   }
-  if (!storage.token) {
+  if (!storage.cloudEnabled) {
     status("local");
     return;
   }
@@ -663,7 +663,7 @@ function renderTimeline() {
       kind: "opening",
       items: [x],
     }));
-  const effects = ["speed", "bars"]
+  const effects = ["bars"]
     .map((kind) => ({
       id: kind,
       name: kind === "speed" ? "播放速度" : "电影黑边",
@@ -996,7 +996,7 @@ function renderInspectorContent() {
           ? '<p class="legacy-speed-note">此旧版慢放区间尚未自动转换，请确认范围后删除区间，并在对应视频的「变速」中设置。</p>'
           : "") +
         field("效果", "kind", obj.kind, {
-          options: { speed: "播放速度 / 慢放", bars: "电影黑边" },
+          options: { bars: "电影黑边" },
         }) +
         field(
           obj.kind === "speed" ? "倍速" : "单侧黑边高度 %",
@@ -1315,7 +1315,7 @@ async function saveCurrent() {
     status("保存失败", error);
     throw error;
   }
-  if (storage.token) {
+  if (storage.cloudEnabled) {
     await sync();
     if (storage.queue.stopped && storage.queue.pending)
       throw Error("本机已保存，云端同步失败，请重试");
@@ -1343,6 +1343,7 @@ async function adopt(project, revision = "none", backup = true) {
   board.selected.clear();
   time = 0;
   storage = new Storage(assets, status);
+  await storage.configure();
   storage.queue.revision = revision;
   storage.saveLocal(project);
   dirty = false;
@@ -1350,6 +1351,7 @@ async function adopt(project, revision = "none", backup = true) {
   autoRepairTimeline();
 }
 async function boot() {
+  await storage.configure();
   let project,
     revision = "none";
   const saved = storage.readLocal();
@@ -1373,7 +1375,7 @@ async function boot() {
   if (project && archiveList()[project.id]?.deleted) project = null;
   idleWorkspace = !project;
   if (!project) project = newProject(); // Internal shell only; never saved until explicit creation.
-  if (!idleWorkspace && storage.token && !saved) {
+  if (!idleWorkspace && storage.cloudEnabled && !saved) {
     try {
       const draft = await storage.draft(project.id);
       project = migrate(draft.project);
@@ -1388,6 +1390,7 @@ async function boot() {
   storage.queue.revision = revision;
   if (!idleWorkspace) storage.saveLocal(project);
   render();
+  if (storage.authenticated) $('[data-action="connect"]')?.remove();
   if (idleWorkspace) await showProjects();
   else {
     status("已保存到本机");
@@ -1769,7 +1772,7 @@ async function importFiles(files, context = { mode: "library" }) {
     busy = false;
     status("local");
     render();
-    if (storage.token) sync();
+    if (storage.cloudEnabled) sync();
   }
 }
 function pick(context) {
@@ -1865,7 +1868,8 @@ async function handleAction(action, button) {
       try {
         await saveCurrent();
         notify(
-          storage.token && !validate(p()).some((x) => x.level === "error")
+          storage.cloudEnabled &&
+            !validate(p()).some((x) => x.level === "error")
             ? "已保存并同步云端"
             : "已保存到本机",
         );
@@ -2216,7 +2220,7 @@ async function handleAction(action, button) {
     }
     case "purge-project":
     case "clear-project-trash": {
-      if (storage.token && !projectCloudReady)
+      if (storage.cloudEnabled && !projectCloudReady)
         throw Error("请等待云端作品读取完成后再清理回收站");
       pendingProjectPurge = projectRows
         .filter(
@@ -2572,7 +2576,7 @@ async function handleAction(action, button) {
     }
     case "publish":
       if (busy) throw Error("请等待素材导入完成");
-      if (!storage.token) {
+      if (!storage.cloudEnabled) {
         publishAfterConnect = true;
         await handleAction("connect", button);
         break;
@@ -2606,7 +2610,7 @@ async function handleAction(action, button) {
         button.disabled = false;
         if (JSON.stringify(p()) !== JSON.stringify(snapshot)) {
           status("local");
-          if (storage.token) sync();
+          if (storage.cloudEnabled) sync();
         }
       }
       break;
@@ -2656,7 +2660,7 @@ async function handleAction(action, button) {
     case "projects": {
       const backups = storage.backups();
       let cloud = [];
-      if (storage.token)
+      if (storage.cloudEnabled)
         try {
           cloud = await response(
             await fetch("/api/v2/projects", { headers: storage.headers() }),
@@ -4206,7 +4210,7 @@ function saveArchive(list) {
 }
 async function showProjects() {
   const request = ++projectRequest;
-  projectCloudReady = !storage.token;
+  projectCloudReady = !storage.cloudEnabled;
   if (page !== "projects")
     workspaceReturn = {
       page,
@@ -4224,10 +4228,10 @@ async function showProjects() {
     local,
     [],
     backups,
-    storage.token ? "正在读取云端作品…" : "",
+    storage.cloudEnabled ? "正在读取云端作品…" : "",
   );
   if (!idleWorkspace) storage.saveLocal(p());
-  if (!storage.token) return;
+  if (!storage.cloudEnabled) return;
   try {
     const cloud = await response(
       await fetch("/api/v2/projects", {
@@ -4432,7 +4436,9 @@ async function workspaceAction(action, button = { dataset: {} }) {
       const copy = clone(source.project);
       copy.id = uid("project");
       copy.name += " 副本";
-      await adopt(copy);
+      storage.saveLocal(p());
+      storage.backup(p(), "复制作品前");
+      await adopt(copy, "none", false);
       await showProjects();
       break;
     }
@@ -4460,7 +4466,10 @@ async function workspaceAction(action, button = { dataset: {} }) {
         const list = archiveList();
         list[id] = { ...value, updatedAt: new Date().toISOString() };
         saveArchive(list);
-        if (storage.token && projectRows.find((x) => x.id === id)?.cloud) {
+        if (
+          storage.cloudEnabled &&
+          projectRows.find((x) => x.id === id)?.cloud
+        ) {
           const remote = await storage.draft(id);
           if (remote.revision !== value.revision)
             throw Error(
@@ -4513,7 +4522,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       const id = button.dataset.id,
         row = projectRows.find((x) => x.id === id);
       if (id === p().id && !idleWorkspace) await saveCurrent();
-      if (storage.token)
+      if (storage.cloudEnabled)
         await response(
           await fetch("/api/v2/archive", {
             method: "POST",
@@ -5920,7 +5929,9 @@ async function autoRepairTimeline() {
   if (repairingTimeline || idleWorkspace) return;
   repairingTimeline = true;
   const immediate = structuredClone(p());
-  if (repairTimelineData(immediate)) {
+  const repaired = repairTimelineData(immediate);
+  const speedMigrated = migrateLegacySpeed(immediate);
+  if (repaired || speedMigrated) {
     storage.backup(p(), "时间轴恢复前");
     mutate("恢复素材长度与默认时间", () => Object.assign(p(), immediate));
   }

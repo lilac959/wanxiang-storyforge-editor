@@ -1,3 +1,4 @@
+import { authenticated, login, loginPage } from "./editor-auth.mjs";
 import { publishing } from "./publishing.mjs";
 import media from "./media-manifest.json" with { type: "json" };
 export { ProjectCoordinator } from "./projects.mjs";
@@ -14,9 +15,46 @@ export default {
       incoming.protocol = "https:";
       return Response.redirect(incoming.href, 308);
     }
+    let signedIn = false;
+    if (env.GAME_ONLY !== "true" && env.EDITOR_PASSWORD) {
+      if (incoming.pathname === "/api/editor/login") return login(request, env);
+      signedIn = await authenticated(request, env);
+      const publicPath =
+        [
+          "/api/site",
+          "/game",
+          "/game/",
+          "/game.html",
+          "/api/project",
+          "/api/v2/published",
+        ].includes(incoming.pathname) ||
+        incoming.pathname.startsWith("/api/v2/release/") ||
+        incoming.pathname.startsWith("/api/media/") ||
+        incoming.pathname.startsWith("/assets/") ||
+        incoming.pathname.startsWith("/studio/");
+      const write = !["GET", "HEAD"].includes(request.method);
+      if (!signedIn && (!publicPath || write)) {
+        if (incoming.pathname.startsWith("/api/"))
+          return Response.json(
+            { error: "请先输入编辑器访问密码" },
+            { status: 401, headers: { "Cache-Control": "no-store" } },
+          );
+        return loginPage();
+      }
+      if (signedIn) {
+        if (write && request.headers.get("Origin") !== incoming.origin)
+          return new Response("Forbidden", { status: 403 });
+        const headers = new Headers(request.headers);
+        headers.set("Authorization", `Bearer ${env.PUBLISH_TOKEN}`);
+        request = new Request(request, { headers });
+      }
+    }
     if (incoming.pathname === "/api/site" && request.method === "GET") {
       return Response.json(
-        { playerUrl: env.PLAYER_URL || new URL("/game", incoming.origin).href },
+        {
+          authenticated: signedIn,
+          playerUrl: env.PLAYER_URL || new URL("/game", incoming.origin).href,
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     }

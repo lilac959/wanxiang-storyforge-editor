@@ -185,66 +185,84 @@ export function repairTimelineData(project) {
 export function migrateLegacySpeed(project) {
   let count = 0;
   for (const scene of project.scenes) {
-    const effects = (scene.effects || []).filter((e) => e.kind === "speed");
-    if (effects.length !== 1 || scene.audio?.length || scene.overlays?.length)
-      continue;
-    const e = effects[0],
-      clips = scene.source === "sequence" ? scene.clips : [];
-    const c = clips.find(
-      (c) =>
-        c.kind === "video" &&
-        mediaRate(c) === 1 &&
-        e.startMs >= c.startMs &&
-        e.endMs <= c.startMs + clipLength(c),
+    const legacy = (scene.effects || []).filter((e) => e.kind === "speed");
+    if (!legacy.length) continue;
+    const effects = legacy.filter(
+      (e) =>
+        validTime(e.startMs) &&
+        validTime(e.endMs) &&
+        e.endMs > e.startMs &&
+        Number.isFinite(e.value) &&
+        e.value > 0 &&
+        e.value <= 4,
     );
-    if (
-      !c ||
-      !validTime(e.startMs) ||
-      !validTime(e.endMs) ||
-      e.endMs <= e.startMs ||
-      !Number.isFinite(e.value) ||
-      e.value < 0.25 ||
-      e.value > 4
-    )
-      continue;
-    const end = c.startMs + clipLength(c);
-    if (
-      (e.startMs > c.startMs && e.startMs - c.startMs < 100) ||
-      (e.endMs < end && end - e.endMs < 100) ||
-      e.endMs - e.startMs < 100
-    )
-      continue;
-    const before = structuredClone(scene);
-    try {
-      let part = c;
-      if (e.startMs > c.startMs) part = splitClip(scene, c.id, e.startMs);
-      if (e.endMs < end) splitClip(scene, part.id, e.endMs);
-      const delta =
-        Math.round((e.endMs - e.startMs) / e.value) - (e.endMs - e.startMs);
-      const map = (t) =>
-        Math.round(
-          t <= e.startMs
-            ? t
-            : t < e.endMs
-              ? e.startMs + (t - e.startMs) / e.value
-              : t + delta,
-        );
-      part.playbackRate = e.value;
-      for (const x of scene.clips)
-        if (x.startMs >= e.endMs) x.startMs = map(x.startMs);
-      for (const key of collections)
+    const bounds = [
+      ...new Set([0, ...effects.flatMap((e) => [e.startMs, e.endMs])]),
+    ].sort((a, b) => a - b);
+    const rateAt = (t) =>
+      effects.find((e) => t >= e.startMs && t < e.endMs)?.value || 1;
+    const map = (t) => {
+      if (!Number.isFinite(t)) return t;
+      let result = 0,
+        previous = 0;
+      for (const b of bounds) {
+        if (b >= t) break;
+        result += (b - previous) / rateAt(previous);
+        previous = b;
+      }
+      return Math.round(result + (t - previous) / rateAt(previous));
+    };
+    const cut = (item, end, visual) => {
+      if (
+        !validTime(item.startMs) ||
+        !Number.isFinite(end) ||
+        end <= item.startMs
+      )
+        return [item];
+      const points = [
+        item.startMs,
+        ...bounds.filter((b) => b > item.startMs && b < end),
+        end,
+      ];
+      return points.slice(0, -1).map((a, i) => {
+        const b = points[i + 1],
+          factor = rateAt(a),
+          originalRate = mediaRate(item);
+        const part = {
+          ...item,
+          id: i ? `${item.id}-speed-${i}` : item.id,
+          startMs: map(a),
+          playbackRate: originalRate * factor,
+          inMs: Math.round(
+            (item.inMs || 0) + (a - item.startMs) * originalRate,
+          ),
+        };
+        if (visual)
+          part.outMs = Math.round(
+            (item.inMs || 0) + (b - item.startMs) * originalRate,
+          );
+        else part.endMs = map(b);
+        return part;
+      });
+    };
+    if (effects.length) {
+      const clips = ensureSequence(scene);
+      scene.clips = clips.flatMap((c) =>
+        cut(c, c.startMs + clipLength(c), true),
+      );
+      for (const key of ["audio", "overlays"])
+        scene[key] = (scene[key] || []).flatMap((x) => cut(x, x.endMs, false));
+      for (const key of ["events", "subtitles", "effects"])
         for (const x of scene[key] || []) {
-          if (x === e) continue;
+          if (x.kind === "speed") continue;
           x.startMs = map(x.startMs);
           x.endMs = map(x.endMs);
         }
       for (const marker of scene.markers || [])
         marker.timeMs = map(marker.timeMs);
-      scene.effects = scene.effects.filter((x) => x !== e);
-      count++;
-    } catch {
-      Object.assign(scene, before);
     }
+    scene.effects = (scene.effects || []).filter((e) => e.kind !== "speed");
+    count += legacy.length;
   }
   return count;
 }

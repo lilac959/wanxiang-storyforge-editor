@@ -24,10 +24,7 @@
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": [
-      "/api/*",
-      "/game",
-      "/game/",
-      "/assets/chapter01-branch-7.mp4"
+      "/*"
     ]
   },
   "kv_namespaces": [

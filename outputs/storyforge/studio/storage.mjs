@@ -52,6 +52,17 @@ export class Storage {
     );
     this.uploading = new Map();
   }
+  get cloudEnabled() {
+    return this.authenticated || !!this.token;
+  }
+  async configure() {
+    try {
+      const r = await fetch("/api/site", { cache: "no-store" });
+      this.authenticated = (await r.json()).authenticated === true;
+    } catch {
+      this.authenticated = false;
+    }
+  }
   setToken(token) {
     this.token = token.trim();
     localStorage.setItem("storyforge-publish-token", this.token);

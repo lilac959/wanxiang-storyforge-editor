@@ -107,7 +107,7 @@ test("legacy repair recovers numeric strings and untrimmed ends without inventin
   assert.equal(e.startMs, 0);
   assert.equal(repairTimelineData(p), 0);
 });
-test("unambiguous legacy speed migrates once while ambiguous ranges remain intact", () => {
+test("legacy speed migrates once and overlapping ranges preserve first-effect priority", () => {
   const { p, s } = setup();
   s.effects = [
     { id: "speed", kind: "speed", startMs: 2000, endMs: 6000, value: 0.5 },
@@ -127,9 +127,25 @@ test("unambiguous legacy speed migrates once while ambiguous ranges remain intac
     { id: "a", kind: "speed", startMs: 0, endMs: 4000, value: 0.5 },
     { id: "b", kind: "speed", startMs: 3000, endMs: 5000, value: 2 },
   ];
-  const before = structuredClone(s);
+  assert.equal(migrateLegacySpeed(p), 2);
+  assert.equal(s.effects.length, 0);
+  assert.equal(
+    Math.max(...s.clips.map((c) => c.startMs + clipLength(c))),
+    17500,
+  );
   assert.equal(migrateLegacySpeed(p), 0);
-  assert.deepEqual(s, before);
+});
+test("legacy speed crosses gaps and media tracks without losing source ranges", () => {
+  const { p, s } = setup();
+  s.clips[0].startMs = 1000;
+  s.audio = [{id:'audio',assetId:'a',inMs:0,startMs:0,endMs:4000}];
+  s.effects = [{id:'speed',kind:'speed',startMs:0,endMs:2000,value:0.5}];
+  assert.equal(migrateLegacySpeed(p),1);
+  assert.equal(s.clips[0].startMs,2000);
+  assert.equal(s.clips[0].playbackRate,0.5);
+  assert.equal(s.clips[0].outMs,s.clips[1].inMs);
+  assert.deepEqual(s.audio.map(x=>[x.startMs,x.endMs,x.inMs,x.playbackRate]),[[0,4000,0,0.5],[4000,6000,2000,1]]);
+  assert.equal(s.effects.length,0);
 });
 test("sequential interactions share one stable track; overlap creates a separate row", () => {
   const { s } = setup();
