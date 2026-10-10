@@ -1,5 +1,5 @@
 // Locally synthesized cues: no remote downloads or copyrighted samples.
-export const qteAudio = (() => {
+export function createQteAudio({ listen = true } = {}) {
   let context = null,
     bus = null,
     heartbeat = null,
@@ -68,7 +68,7 @@ export const qteAudio = (() => {
   function start(n) {
     stop();
     if (n.qteSound === "off") return;
-    unlock();
+    const ready = unlock();
     current = { began: performance.now(), limit: Number(n.limit) || 4 };
     lastProgress = 0;
     if (bus)
@@ -85,7 +85,10 @@ export const qteAudio = (() => {
       tone(150, 75, 0.12, 0.15, 0.2, "triangle");
       heartbeat = setTimeout(beat, 900 - urgency * 440);
     }
-    beat();
+    const started = current;
+    Promise.resolve(ready).then(() => {
+      if (current === started) beat();
+    });
   }
   function input(kind) {
     if (kind === "hold") tone(150, 260, 0.18, 0.09);
@@ -106,9 +109,17 @@ export const qteAudio = (() => {
       tone(720, 900, 0.17, 0.1, 0.08);
     } else tone(150, 36, 0.24, 0.2);
   }
-  if (typeof document !== "undefined") {
+  if (listen && typeof document !== "undefined") {
     for (const event of ["pointerdown", "pointerup", "click", "keydown"])
       document.addEventListener(event, unlock, { capture: true });
   }
-  return { start, stop, input, progress, result, unlock };
-})();
+  function dispose() {
+    stop();
+    if (listen && typeof document !== "undefined")
+      for (const event of ["pointerdown", "pointerup", "click", "keydown"])
+        document.removeEventListener(event, unlock, { capture: true });
+    context?.close?.().catch(() => {});
+  }
+  return { start, stop, input, progress, result, unlock, dispose };
+}
+export const qteAudio = createQteAudio();

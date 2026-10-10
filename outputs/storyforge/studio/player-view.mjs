@@ -19,7 +19,7 @@ import {
   openingCard,
 } from "./model.mjs";
 import { esc } from "./storage.mjs";
-import { qteAudio } from "./audio.mjs";
+import { createQteAudio } from "./audio.mjs";
 import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
 import { uiTransformStyle, captionBoxStyle } from "./canvas-transform.mjs";
 import { eventTransform } from "./keyframes.mjs";
@@ -45,6 +45,8 @@ export class PlayerView {
     this.onHome = onHome;
     this.onChange = onChange;
     this.editing = editing;
+    this.cues = createQteAudio({ listen: !editing });
+    this.soundKey = null;
     this.onSelect = onSelect;
     this.token = 0;
     this.audio = new Map();
@@ -144,7 +146,7 @@ export class PlayerView {
           sound.querySelector(".sound-state").textContent = this.muted
             ? "关闭"
             : "开启";
-          if (this.muted) qteAudio.stop();
+          if (this.muted) this.cues.stop();
         }
         return;
       }
@@ -202,7 +204,7 @@ export class PlayerView {
         ?.querySelector(".qte")
         ?.classList.add("qte-input");
       this.stage.setPointerCapture?.(e.pointerId);
-      qteAudio.input(event.gesture);
+      this.cues.input(event.gesture);
     };
     this.move = (e) => {
       const active = this.runtime?.active;
@@ -226,7 +228,7 @@ export class PlayerView {
         event.distance,
         this.pointer.scale,
       );
-      if (!this.muted) qteAudio.progress(active.progress);
+      if (!this.muted) this.cues.progress(active.progress);
       this.paintHud();
       if (active.progress >= 1) {
         this.pointer = null;
@@ -378,7 +380,7 @@ export class PlayerView {
     );
     // Browsers may keep audio activation pending until a real user gesture.
     // Video and opening UI must render without waiting for that permission.
-    qteAudio.unlock();
+    this.cues.unlock();
     this.runtime.start(sceneId, time);
     await this.mountPromise;
     if (this.disposed) return;
@@ -417,13 +419,15 @@ export class PlayerView {
     this.prefetch = [];
     this.pointer = null;
     this.loading = false;
-    qteAudio.stop();
+    this.cues.stop();
+    this.soundKey = null;
   }
   dispose() {
     this.openingObserver?.disconnect();
     this.stageObserver?.disconnect();
     this.stop();
     this.disposed = true;
+    this.cues.dispose();
     clearTimeout(this.settingsTimer);
     this.root.removeEventListener("click", this.reveal);
     document.removeEventListener("keydown", this.menuKey);
@@ -754,20 +758,21 @@ export class PlayerView {
     }
     if (event.type === "pause") {
       this.cancel();
-      qteAudio.stop();
+      this.cues.stop();
+      this.soundKey = null;
       this.pauseMedia();
     }
     if (event.type === "resume") {
       this.last = performance.now();
-      if (runtime.active) this.startSound(runtime.active.event);
+      this.syncInteractionSound();
       this.syncMedia();
     }
     if (event.type === "event") {
       this.root.classList.remove("settings-visible");
-      if (runtime.interactions.size === 1) this.startSound(event.event);
+      this.syncInteractionSound();
     }
     if (event.type === "operation") {
-      this.startSound(runtime.active.event);
+      this.syncInteractionSound();
     }
     if (event.type === "conflict") {
       this.showError(event.message);
@@ -776,7 +781,8 @@ export class PlayerView {
     if (event.type === "result") {
       this.interactionUntil = performance.now() + 500;
       this.pointer = null;
-      qteAudio.stop();
+      this.cues.stop();
+      this.soundKey = null;
       this.root.querySelector(".feedback").textContent = "";
     }
     if (event.type === "complete") {
@@ -796,15 +802,37 @@ export class PlayerView {
     }
     this.root.querySelector('[data-player="pause"] span').textContent =
       "继续游玩";
+    this.syncInteractionSound();
     this.onChange(event, runtime);
   }
-  startSound(e) {
-    if (e.kind === "qte" && !this.muted)
-      qteAudio.start({
-        qteSound: e.sound,
-        qteVolume: e.volume,
-        limit: e.timeoutMs / 1000,
-      });
+  syncInteractionSound() {
+    const r = this.runtime;
+    const candidates = r
+      ? [r.operating, r.active, ...r.interactions.values()].filter(Boolean)
+      : [];
+    const interaction = candidates.find(
+      (x) => x.event.sound !== "off" && Number(x.event.volume ?? 0.35) > 0,
+    );
+    if (
+      this.editing ||
+      this.muted ||
+      !r?.playing ||
+      this.loading ||
+      !interaction
+    ) {
+      if (this.soundKey) this.cues.stop();
+      this.soundKey = null;
+      return;
+    }
+    const e = interaction.event;
+    const key = `${e.id}:${e.sound}:${e.volume}`;
+    if (this.soundKey === key) return;
+    this.soundKey = key;
+    this.cues.start({
+      qteSound: e.sound,
+      qteVolume: e.volume,
+      limit: e.timeoutMs / 1000,
+    });
   }
   pauseMedia() {
     this.video?.pause();
@@ -914,7 +942,7 @@ export class PlayerView {
       layer.querySelector("button")?.addEventListener("click", () => {
         if (this.editing) this.onSelect("start", "opening");
         else if (this.runtime?.scene.id === scene.id) {
-          qteAudio.unlock();
+          this.cues.unlock();
           this.runtime.follow(scene.next);
         }
       });
@@ -1278,7 +1306,7 @@ export class PlayerView {
           0,
           1,
         );
-        if (!this.muted) qteAudio.progress(r.active.progress);
+        if (!this.muted) this.cues.progress(r.active.progress);
         if (r.active.progress >= 1) {
           this.pointer = null;
           r.resolve(true);
