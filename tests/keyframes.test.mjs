@@ -16,6 +16,7 @@ import {
   keyframeError,
   keyframePoints,
   moveKeyframePoint,
+  toggleTransformKeyframe,
 } from "../outputs/storyforge/studio/keyframes.mjs";
 import {
   splitRange,
@@ -271,5 +272,25 @@ test("clip diamonds group coincident properties and move atomically", () => {
   assert.throws(() => moveKeyframePoint(event, points[0].refs, 2000));
   assert.equal(event.keyframes.scale[0].timeMs, 500);
   for (const ref of points[0].refs) removeKeyframe(event, ref.property, ref.id);
+  assert.equal(keyframePoints(event).length, 1);
+});
+
+test("overall keyframe captures XY and sizes, fills partial frames and removes complete point", () => {
+  const event = {
+    startMs: 0,
+    endMs: 4000,
+    x: 30,
+    y: 60,
+    scale: 80,
+    stretchX: 100,
+    stretchY: 90,
+  };
+  putKeyframe(event, "position", 0);
+  writeTransform(event, event, 1000, { y: 75 });
+  assert.deepEqual(event.keyframes.position[1].values, { x: 30, y: 75 });
+  toggleTransformKeyframe(event, 1000);
+  assert.equal(keyframePoints(event)[1].refs.length, 4);
+  assert.equal(event.keyframes.position[1].values.y, 75);
+  toggleTransformKeyframe(event, 1000);
   assert.equal(keyframePoints(event).length, 1);
 });

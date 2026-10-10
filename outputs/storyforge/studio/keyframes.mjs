@@ -165,13 +165,11 @@ export function keyframePoints(event) {
         const timeMs = frame.timeMs - (item.keyframeOffsetMs || 0);
         if (timeMs < 0 || timeMs > event.endMs - event.startMs) continue;
         if (!points.has(timeMs)) points.set(timeMs, { timeMs, refs: [] });
-        points
-          .get(timeMs)
-          .refs.push({
-            optionId: item === event ? "" : item.id,
-            property,
-            id: frame.id,
-          });
+        points.get(timeMs).refs.push({
+          optionId: item === event ? "" : item.id,
+          property,
+          id: frame.id,
+        });
       }
     }
   }
@@ -199,5 +197,21 @@ export function moveKeyframePoint(event, refs, relativeTime) {
   for (const { frames, frame, at } of updates) {
     frame.timeMs = at;
     frames.sort((a, b) => a.timeMs - b.timeMs);
+  }
+}
+
+export function toggleTransformKeyframe(item, at) {
+  const properties = Object.keys(KEYFRAME_PROPERTIES);
+  const complete = properties.every((property) =>
+    item.keyframes?.[property]?.some((f) => f.timeMs === at),
+  );
+  if (complete) {
+    for (const property of properties) {
+      const frame = item.keyframes[property].find((f) => f.timeMs === at);
+      removeKeyframe(item, property, frame.id);
+    }
+  } else {
+    const value = sampleKeyframes(item, at);
+    for (const property of properties) putKeyframe(item, property, at, value);
   }
 }

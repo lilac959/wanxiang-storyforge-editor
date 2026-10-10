@@ -2945,29 +2945,32 @@ body[data-view="scene"] .timeline-head {
 }
 .keyframe-strip {
   position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: 0;
-  height: 12px;
-  z-index: 2;
+  left: 0;
+  right: 0;
+  height: 18px;
+  z-index: 4;
   pointer-events: none;
 }
 #studio .timeline-scroll button.keyframe-dot {
   pointer-events: auto;
   min-width: 0;
   min-height: 0;
-  width: 12px;
-  height: 12px;
+  width: 24px;
+  height: 18px;
   position: absolute;
   top: 0;
   transform: translateX(-50%);
   border: 0;
   background: transparent;
   color: white;
-  text-shadow: 0 0 2px #795623;
+  text-shadow:
+    -1px 0 #8f743f,
+    1px 0 #8f743f,
+    0 -1px #8f743f,
+    0 1px #8f743f;
   padding: 0;
-  font-size: 10px;
-  line-height: 12px;
+  font-size: 14px;
+  line-height: 18px;
   cursor: ew-resize;
 }
 #studio .timeline-scroll button.keyframe-dot.active {
@@ -2996,4 +2999,32 @@ body[data-view="scene"] .timeline-head {
 }
 .keyframe-field .keyframe-controls {
   margin-top: 12px;
+}
+
+.keyframe-transform-header,
+.keyframe-position-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.keyframe-transform-header {
+  margin: 14px 0 10px;
+  font-size: 12px;
+}
+.keyframe-position-header {
+  color: #7f8395;
+  font-size: 11px;
+}
+.keyframe-position-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+#studio .keyframe-position-fields .field {
+  margin: 6px 0 12px;
+}
+#studio .inspector .keyframe-controls [data-action="kf-toggle"] {
+  min-width: 22px;
+  font-size: 16px;
 }

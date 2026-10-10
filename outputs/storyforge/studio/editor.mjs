@@ -28,6 +28,7 @@ import {
   shiftKeyframeOrigin,
   keyframePoints,
   moveKeyframePoint,
+  toggleTransformKeyframe,
 } from "./keyframes.mjs";
 let timelineProperties = null;
 import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
@@ -5982,6 +5983,16 @@ function addKeyframeControls(panel) {
   const targets = event.kind === "choice" ? event.options : [event];
   for (const [index, item] of targets.entries()) {
     const prefix = event.kind === "choice" ? `options.${index}.` : "";
+    const xField = panel
+      .querySelector(`[data-field="${prefix}x"]`)
+      ?.closest(".field");
+    if (xField) {
+      const header = document.createElement("div");
+      header.className = "keyframe-transform-header";
+      const optionId = item === event ? "" : item.id;
+      header.innerHTML = `<strong>位置与大小</strong><div class="keyframe-controls" data-keyframe-property="all" data-option-id="${esc(optionId)}"><button type="button" data-action="kf-previous" data-property="all" data-option-id="${esc(optionId)}" aria-label="上一个总体关键帧">‹</button><button type="button" data-action="kf-toggle" data-property="all" data-option-id="${esc(optionId)}" aria-label="添加总体关键帧" title="同时记录位置、大小和横纵拉伸">◇</button><button type="button" data-action="kf-next" data-property="all" data-option-id="${esc(optionId)}" aria-label="下一个总体关键帧">›</button></div>`;
+      xField.before(header);
+    }
     for (const [property, spec] of Object.entries(KEYFRAME_PROPERTIES)) {
       const input = panel.querySelector(
         `[data-field="${prefix + spec.keys[0]}"]`,
@@ -6007,7 +6018,24 @@ function addKeyframeControls(panel) {
       const wrapper = document.createElement("div");
       wrapper.className = "keyframe-field";
       field.before(wrapper);
-      wrapper.append(field, controls);
+      if (property === "position") {
+        const yField = panel
+          .querySelector(`[data-field="${prefix}y"]`)
+          ?.closest(".field");
+        yField
+          ?.querySelector("input")
+          ?.setAttribute("aria-label", yField.firstChild.textContent.trim());
+        wrapper.className = "keyframe-position-group";
+        const heading = document.createElement("div");
+        heading.className = "keyframe-position-header";
+        heading.innerHTML = "<span>位置 X / Y</span>";
+        heading.append(controls);
+        const fields = document.createElement("div");
+        fields.className = "keyframe-position-fields";
+        fields.append(field);
+        if (yField) fields.append(yField);
+        wrapper.append(heading, fields);
+      } else wrapper.append(field, controls);
     }
   }
   refreshKeyframeControls();
@@ -6020,14 +6048,24 @@ function refreshKeyframeControls() {
     const item = keyframeItem(event, controls.dataset.optionId),
       property = controls.dataset.keyframeProperty;
     const at = localTime(event, item, time),
-      frames = item.keyframes?.[property] || [];
-    const current = frames.find((f) => f.timeMs === at);
+      frames =
+        property === "all"
+          ? Object.values(item.keyframes || {})
+              .flat()
+              .sort((a, b) => a.timeMs - b.timeMs)
+          : item.keyframes?.[property] || [];
+    const current =
+      property === "all"
+        ? Object.keys(KEYFRAME_PROPERTIES).every((p) =>
+            item.keyframes?.[p]?.some((f) => f.timeMs === at),
+          )
+        : frames.find((f) => f.timeMs === at);
     const toggle = controls.querySelector('[data-action="kf-toggle"]');
     toggle.textContent = current ? "◆" : "◇";
     toggle.setAttribute("aria-pressed", String(!!current));
     toggle.setAttribute(
       "aria-label",
-      `${current ? "删除" : "添加"}${KEYFRAME_PROPERTIES[property].label}关键帧`,
+      `${current ? "删除" : "添加"}${property === "all" ? "总体" : KEYFRAME_PROPERTIES[property].label}关键帧`,
     );
     toggle.disabled = locked || time < event.startMs || time > event.endMs;
     controls.querySelector('[data-action="kf-previous"]').disabled =
@@ -6039,6 +6077,7 @@ function refreshKeyframeControls() {
         f.timeMs > at &&
         f.timeMs <= (item.keyframeOffsetMs || 0) + event.endMs - event.startMs,
     );
+    if (property === "all") continue;
     controls.querySelector('[data-action="kf-clear"]').disabled =
       locked || !frames.length;
     const easing = controls.querySelector("select");
@@ -6078,7 +6117,12 @@ function keyframeAction(action, button) {
   const { property, optionId, keyframeId } = button.dataset;
   const item = keyframeItem(event, optionId),
     at = localTime(event, item, time),
-    frames = item.keyframes?.[property] || [];
+    frames =
+      property === "all"
+        ? Object.values(item.keyframes || {})
+            .flat()
+            .sort((a, b) => a.timeMs - b.timeMs)
+        : item.keyframes?.[property] || [];
   const frame = keyframeId
     ? frames.find((f) => f.id === keyframeId)
     : frames.find((f) => f.timeMs === at);
@@ -6108,7 +6152,9 @@ function keyframeAction(action, button) {
   if (time < event.startMs || time > event.endMs)
     throw Error("请将播放头放在互动片段范围内");
   mutate("编辑互动关键帧", () => {
-    if (action === "kf-clear") {
+    if (property === "all") {
+      toggleTransformKeyframe(item, at);
+    } else if (action === "kf-clear") {
       const value = eventTransform(event, item, time);
       for (const key of KEYFRAME_PROPERTIES[property].keys)
         item[key] = value[key];
@@ -6131,6 +6177,7 @@ function renderKeyframeTimeline() {
   clip.classList.add("has-keyframes");
   const strip = document.createElement("div");
   strip.className = "keyframe-strip";
+  strip.style.top = `${clip.offsetTop + clip.offsetHeight - 19}px`;
   strip.innerHTML = points
     .map((point) => {
       const first = point.refs[0];
@@ -6140,7 +6187,7 @@ function renderKeyframeTimeline() {
         ),
       ].join("、");
       const seconds = ((event.startMs + point.timeMs) / 1000).toFixed(3);
-      return `<button type="button" class="keyframe-dot" data-action="kf-goto" data-property="${first.property}" data-option-id="${esc(first.optionId)}" data-keyframe-id="${esc(first.id)}" data-keyframe-group="${esc(JSON.stringify(point.refs))}" style="left:${(point.timeMs / Math.max(1, event.endMs - event.startMs)) * 100}%" title="${esc(label)} · ${seconds} 秒" aria-label="${esc(label)}关键帧 ${seconds} 秒">◆</button>`;
+      return `<button type="button" class="keyframe-dot" data-action="kf-goto" data-property="${first.property}" data-option-id="${esc(first.optionId)}" data-keyframe-id="${esc(first.id)}" data-keyframe-group="${esc(JSON.stringify(point.refs))}" style="left:${((event.startMs + point.timeMs) / timelineSpan()) * 100}%" title="${esc(label)} · ${seconds} 秒" aria-label="${esc(label)}关键帧 ${seconds} 秒">◆</button>`;
     })
     .join("");
   strip.addEventListener("pointerdown", keyframePointer);
@@ -6154,7 +6201,7 @@ function renderKeyframeTimeline() {
       notify(error.message);
     }
   });
-  clip.append(strip);
+  clip.parentElement.append(strip);
   refreshKeyframeControls();
 }
 function keyframePointer(e) {
@@ -6186,7 +6233,7 @@ function keyframePointer(e) {
   };
   cancelTimelineGesture = () => {
     cleanup();
-    dot.style.left = (original / Math.max(1, duration)) * 100 + "%";
+    dot.style.left = ((event.startMs + original) / timelineSpan()) * 100 + "%";
   };
   window.addEventListener(
     "pointermove",
@@ -6194,11 +6241,13 @@ function keyframePointer(e) {
       if (!moved && Math.abs(move.clientX - originX) < 4) return;
       moved = true;
       destination = clamp(
-        Math.round(((move.clientX - rect.left) / rect.width) * duration),
+        Math.round(((move.clientX - rect.left) / rect.width) * timelineSpan()) -
+          event.startMs,
         0,
         duration,
       );
-      dot.style.left = (destination / Math.max(1, duration)) * 100 + "%";
+      dot.style.left =
+        ((event.startMs + destination) / timelineSpan()) * 100 + "%";
       dot.title = ((event.startMs + destination) / 1000).toFixed(3) + " 秒";
     },
     { signal: controller.signal },
