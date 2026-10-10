@@ -202,7 +202,7 @@ function installEndingNode(p){
  p.nodes.push({id,name:'山海有归，故事未尽',subtitle:p.name,duration:8,trigger:0,type:'choice',limit:8,video:'',options:[{text:'再走一条不同的路 →',target:p.nodes[0].id}],failure:'',x:50,y:50,endingScreen:true});
  p.endingNodeRevision=1;
 }
-function endingMarkup(n,actions){return `<div class="stage settingsstage" id="sceneStage">${n.video||usingBoards(n)?nodeMarkup(n):scenery()}<div class="sceneoverlay loadcontent introtitle"><p>THE END</p><h2>${esc(n.name)}</h2><p>${esc(n.subtitle)}</p>${actions?'<div class="choices">'+n.options.map(o=>`<button tabindex="-1" ${choicePosition(o)}>${esc(o.text)}</button>`).join('')+'</div>':''}</div></div>`}
+function endingMarkup(n,actions){return `<div class="stage settingsstage" id="sceneStage">${n.video||usingBoards(n)?nodeMarkup(n):scenery()}<div class="sceneoverlay loadcontent introtitle"><h2>${esc(n.name)}</h2>${n.subtitle && n.subtitle !== project.name ? `<p>${esc(n.subtitle)}</p>` : ""}${actions?'<div class="choices">'+n.options.map(o=>`<button tabindex="-1" ${choicePosition(o)}>${esc(o.text)}</button>`).join('')+'</div>':''}</div></div>`}
 function finish(){const ending=project.nodes.find(n=>n.endingScreen);if(ending){playNode(ending.id);return}setPlayerPhase('complete');clearInterval(timer);$('#playerStatus').textContent='作品试玩完成';$('#playerScreen').innerHTML='<div class="stage settingsstage">'+scenery()+'</div>'}
 $('#player').addEventListener('cancel',stop);
 let exportingProject=false;

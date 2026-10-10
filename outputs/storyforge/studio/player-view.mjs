@@ -982,7 +982,11 @@ export class PlayerView {
     const text = `${scene.name}|${scene.subtitle}|${scene.role}`;
     if (title.dataset.text !== text) {
       title.dataset.text = text;
-      title.innerHTML = `<small>${scene.role === "death" ? "◇" : scene.role === "ending" ? "THE END" : ""}</small><h2>${esc(scene.name)}</h2><p>${esc(scene.subtitle)}</p>`;
+      const subtitle =
+        scene.role === "ending" && scene.subtitle === this.project.name
+          ? ""
+          : scene.subtitle;
+      title.innerHTML = `${scene.role === "death" ? "<small>◇</small>" : ""}<h2>${esc(scene.name)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ""}`;
     }
     const captions = scene.subtitles
       .filter(
