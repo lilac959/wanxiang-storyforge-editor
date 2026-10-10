@@ -23,7 +23,7 @@ import { createQteAudio } from "./audio.mjs";
 import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
 import { uiTransformStyle, captionBoxStyle } from "./canvas-transform.mjs";
 import { eventTransform } from "./keyframes.mjs";
-import { firstVideoFrame, nativeOpeningLoop } from "./media-ready.mjs";
+import { presentVideoFrame, nativeOpeningLoop } from "./media-ready.mjs";
 import { UI_IMAGES } from "./preload.mjs";
 
 export class PlayerView {
@@ -551,7 +551,7 @@ export class PlayerView {
     this.currentClip = current;
     this.mountedClipId = current?.id || "gap";
     // Retain the last decoded frame until the replacement media is ready.
-    let previousFrame;
+    let previousFrame = this.visual.querySelector(".media-transition-frame");
     if (this.video?.readyState >= 2) {
       previousFrame = document.createElement("canvas");
       previousFrame.width = this.video.videoWidth;
@@ -568,7 +568,7 @@ export class PlayerView {
     this.hud.innerHTML = "";
     this.loading = true;
     this.loadingError = null;
-    this.message.hidden = false;
+    this.message.hidden = !!previousFrame;
     this.message.textContent = "正在读取素材…";
     this.stillImage = null;
     this.stage.classList.toggle("grayscale", scene.grayscale);
@@ -624,17 +624,9 @@ export class PlayerView {
         const releaseFrame = () => {
           if (token === this.token) previousFrame?.remove();
         };
-        v.addEventListener("seeked", releaseFrame, { once: true });
-        v.addEventListener(
-          "loadeddata",
-          () => {
-            if (!v.seeking) releaseFrame();
-          },
-          { once: true },
-        );
         v.currentTime = sourceTime(this.currentClip, time) / 1000;
         v.loop = !!nativeOpeningLoop(scene, current, v.duration);
-        await firstVideoFrame(v, this.mediaController.signal);
+        await presentVideoFrame(v, this.mediaController.signal);
         if (token !== this.token) return;
         releaseFrame();
         v.onerror = () => {

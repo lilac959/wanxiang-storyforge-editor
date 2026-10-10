@@ -45,3 +45,24 @@ export function firstVideoFrame(video, signal) {
     ready();
   });
 }
+
+// A decoded frame is not necessarily on screen yet. Keep the old image through
+// a render cycle before removing it, including paused and freshly sought videos.
+export async function presentVideoFrame(video, signal) {
+  await firstVideoFrame(video, signal);
+  signal?.throwIfAborted();
+  await new Promise((resolve, reject) => {
+    let frame;
+    const abort = () => {
+      cancelAnimationFrame(frame);
+      reject(signal.reason);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      });
+    });
+  });
+}

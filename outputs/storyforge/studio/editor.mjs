@@ -1607,6 +1607,8 @@ async function previewAsset(id, kind) {
         esc(id) +
         '">添加到当前节点</button>',
     );
+    if (page === "assets")
+      $("#panel").querySelector('[data-action="use-ui"]')?.remove();
     componentPlayer = new PlayerView(
       $(".component-preview .player-root"),
       assets,
@@ -1658,6 +1660,8 @@ async function previewAsset(id, kind) {
       esc(id) +
       '">添加到当前节点</button>',
   );
+  if (page === "assets")
+    $("#panel").querySelector('[data-action="use-asset"]')?.remove();
   const token = previewAssetToken,
     url = await assets.url(a);
   if (token !== previewAssetToken || !$("#panel").open) return;
@@ -1942,6 +1946,23 @@ function pick(context) {
   $("#assetFiles").click();
 }
 async function handleAction(action, button) {
+  if (
+    page === "assets" &&
+    [
+      "add-library-item",
+      "use-ui",
+      "use-asset",
+      "add-subtitle",
+      "add-bars",
+      "rename-asset",
+      "save-asset-name",
+      "replace-asset",
+      "confirm-replace-asset",
+      "remove-asset",
+      "batch-remove-assets",
+    ].includes(action)
+  )
+    throw Error("素材库仅用于预览，请到画布中添加或编辑素材");
   if (action.startsWith("kf-")) return keyframeAction(action, button);
   if (action === "add-library-item") {
     if (button.dataset.kind === "ui") return handleAction("use-ui", button);

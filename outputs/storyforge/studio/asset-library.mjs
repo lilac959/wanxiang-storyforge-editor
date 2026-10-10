@@ -47,6 +47,7 @@ export class AssetLibrary {
     this.store = store;
     this.preview = preview;
     this.drag = drag;
+    this.canInsert = !!drag;
     this.category = "all";
     this.search = "";
     this.sort = "recent";
@@ -65,6 +66,11 @@ export class AssetLibrary {
     });
   }
   mount(host, project) {
+    if (!this.canInsert) {
+      this.managing = false;
+      this.selected.clear();
+      if (["text", "effect"].includes(this.category)) this.category = "all";
+    }
     const signature = JSON.stringify([
       project.id,
       project.assets,
@@ -95,6 +101,7 @@ export class AssetLibrary {
     host.innerHTML = `<div class="asset-toolbar"><div class="asset-tabs" role="group" aria-label="素材分类">${Object.entries(
       labels,
     )
+      .filter(([k]) => this.canInsert || !["text", "effect"].includes(k))
       .map(
         ([k, v]) =>
           `<button data-category="${k}" aria-pressed="${this.category === k}">${v}</button>`,
@@ -143,7 +150,8 @@ export class AssetLibrary {
         this.anchor = null;
         this.grid();
       };
-      controls.append(filter, manage);
+      controls.append(filter);
+      if (this.canInsert) controls.append(manage);
     }
   }
   grid() {
@@ -153,13 +161,11 @@ export class AssetLibrary {
       v.removeAttribute("src");
       v.load();
     });
-    if (["text", "effect"].includes(this.category)) {
+    if (this.canInsert && ["text", "effect"].includes(this.category)) {
       const templates =
         this.category === "text"
           ? [["add-subtitle", "普通字幕", "Aa", "可修改文字、位置和样式"]]
-          : [
-              ["add-bars", "电影黑边", "▰", "添加上下黑边"],
-            ];
+          : [["add-bars", "电影黑边", "▰", "添加上下黑边"]];
       grid.innerHTML = templates
         .map(
           ([action, name, symbol, description]) =>
@@ -208,7 +214,7 @@ export class AssetLibrary {
       list
         .map(
           (a) =>
-            `<article class="media-card"><button class="media-open" data-media-id="${esc(a.id)}" data-media-kind="${a.kind}" aria-label="预览 ${esc(a.name)}"><div class="media-thumb ${a.kind}">${a.kind === "ui" ? componentThumbnail(a) : a.kind === "audio" ? '<span class="audio-symbol">♫</span>' : "<span>加载缩略图…</span>"}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${labels[a.kind]}${a.durationMs ? ` · ${(a.durationMs / 1000).toFixed(1)} 秒` : ""}${a.kind === "ui" ? " · 第 1 版" : ""}</small></button><button class="media-add" data-action="add-library-item" data-id="${esc(a.id)}" data-kind="${a.kind}" aria-label="添加 ${esc(a.name)}到时间轴" title="添加到播放指针位置">＋</button><details class="media-menu"><summary aria-label="${esc(a.name)}操作">···</summary><div>${a.kind === "ui" ? `<button data-action="preview-ui" data-id="${esc(a.id)}">预览并试用</button><button data-action="use-ui" data-id="${esc(a.id)}">添加到当前节点</button>` : `<button data-action="rename-asset" data-id="${esc(a.id)}">重命名</button><button data-action="asset-uses" data-id="${esc(a.id)}">查看使用位置</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="remove-asset" data-id="${esc(a.id)}">删除</button>`}</div></details></article>`,
+            `<article class="media-card"><button class="media-open" data-media-id="${esc(a.id)}" data-media-kind="${a.kind}" aria-label="预览 ${esc(a.name)}"><div class="media-thumb ${a.kind}">${a.kind === "ui" ? componentThumbnail(a) : a.kind === "audio" ? '<span class="audio-symbol">♫</span>' : "<span>加载缩略图…</span>"}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${labels[a.kind]}${a.durationMs ? ` · ${(a.durationMs / 1000).toFixed(1)} 秒` : ""}${a.kind === "ui" ? " · 第 1 版" : ""}</small></button>${this.canInsert ? `<button class="media-add" data-action="add-library-item" data-id="${esc(a.id)}" data-kind="${a.kind}" aria-label="添加 ${esc(a.name)}到时间轴" title="添加到播放指针位置">＋</button>` : ""}<details class="media-menu"><summary aria-label="${esc(a.name)}操作">···</summary><div>${a.kind === "ui" ? `<button data-action="preview-ui" data-id="${esc(a.id)}">预览并试用</button>${this.canInsert ? `<button data-action="use-ui" data-id="${esc(a.id)}">添加到当前节点</button>` : ""}` : `<button data-action="asset-uses" data-id="${esc(a.id)}">查看使用位置</button>${this.canInsert ? `<button data-action="rename-asset" data-id="${esc(a.id)}">重命名</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="remove-asset" data-id="${esc(a.id)}">删除</button>` : ""}`}</div></details></article>`,
         )
         .join("") || '<p class="media-empty">没有找到素材</p>';
     if (this.managing) {
@@ -251,7 +257,7 @@ export class AssetLibrary {
         b.draggable = false;
         return;
       }
-      b.draggable = true;
+      b.draggable = this.canInsert;
       let dragged = false;
       b.onclick = () => {
         if (dragged) {
@@ -260,6 +266,7 @@ export class AssetLibrary {
         }
         this.preview(b.dataset.mediaId, b.dataset.mediaKind);
       };
+      if (!this.canInsert) return;
       if (this.drag)
         b.onpointerdown = (e) => {
           if (e.button !== 0) return;

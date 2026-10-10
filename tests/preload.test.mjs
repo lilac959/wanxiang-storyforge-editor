@@ -13,6 +13,7 @@ import {
 import { Runtime } from "../outputs/storyforge/studio/runtime.mjs";
 import {
   firstVideoFrame,
+  presentVideoFrame,
   nativeOpeningLoop,
 } from "../outputs/storyforge/studio/media-ready.mjs";
 
@@ -229,4 +230,39 @@ test("opening loops retain runtime generation and native looping only applies to
     ),
     false,
   );
+});
+
+test("transition holds the outgoing frame until the replacement has passed a paint cycle", async () => {
+  const oldRequest = globalThis.requestAnimationFrame,
+    oldCancel = globalThis.cancelAnimationFrame;
+  const frames = [];
+  globalThis.requestAnimationFrame = (fn) => {
+    frames.push(fn);
+    return frames.length;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+  try {
+    const v = Object.assign(new EventTarget(), {
+      readyState: 2,
+      seeking: false,
+    });
+    let released = false;
+    const pending = presentVideoFrame(v).then(() => (released = true));
+    await Promise.resolve();
+    assert.equal(released, false);
+    frames.shift()();
+    await Promise.resolve();
+    assert.equal(released, false);
+    frames.shift()();
+    await pending;
+    assert.equal(released, true);
+    const controller = new AbortController();
+    const cancelled = presentVideoFrame(v, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await assert.rejects(cancelled, { name: "AbortError" });
+  } finally {
+    globalThis.requestAnimationFrame = oldRequest;
+    globalThis.cancelAnimationFrame = oldCancel;
+  }
 });

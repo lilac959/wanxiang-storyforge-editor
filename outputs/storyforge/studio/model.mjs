@@ -291,7 +291,16 @@ export function changeRole(project, id, role) {
     delete scene.savedRoutes;
   }
   scene.role = role;
+  defaultTerminalExit(scene);
   if (openingRole(scene)) openingElements(scene);
+}
+// Terminal cards need no destination unless the author explicitly chose one.
+function defaultTerminalExit(scene) {
+  if (
+    ["ending", "death"].includes(scene.role) &&
+    scene.next?.kind === "unlinked"
+  )
+    scene.next = endTarget();
 }
 export function setCardNext(project, id, target) {
   const scene = project.scenes.find((s) => s.id === id),
@@ -403,6 +412,7 @@ export function migrate(input) {
       (x) => x.level === "error" && x.code === "structure",
     );
     if (errors.length) throw Error(errors[0].message);
+    p.scenes.forEach(defaultTerminalExit);
     if (old.schemaVersion === 2) spaceCards(p);
     return unifyCards(p);
   }
@@ -551,6 +561,7 @@ export function migrate(input) {
     };
   });
   spaceCards(p);
+  p.scenes.forEach(defaultTerminalExit);
   p.migrationBackup = undefined;
   return unifyCards(p);
 }

@@ -163,3 +163,36 @@ test("switching between loading and splash keeps each configuration and a valid 
     [],
   );
 });
+
+test("terminal role defaults an unlinked exit to end while preserving explicit routes", () => {
+  for (const role of ["ending", "death"]) {
+    const p = newProject(),
+      scene = p.scenes.find((s) => s.id === p.entryId);
+    scene.next = { kind: "unlinked" };
+    changeRole(p, scene.id, role);
+    assert.deepEqual(scene.next, { kind: "end" });
+    scene.next = { kind: "scene", sceneId: scene.id };
+    changeRole(p, scene.id, role);
+    assert.deepEqual(scene.next, { kind: "scene", sceneId: scene.id });
+  }
+});
+test("reopening legacy terminal cards repairs only unresolved terminal exits", () => {
+  const p = newProject();
+  for (const role of ["story", "ending", "death"]) {
+    const scene = newScene(role);
+    scene.role = role;
+    scene.next = { kind: "unlinked" };
+    p.scenes.push(scene);
+  }
+  const copy = migrate(p);
+  for (const role of ["ending", "death"])
+    assert.deepEqual(copy.scenes.find((s) => s.name === role).next, {
+      kind: "end",
+    });
+  assert.equal(
+    copy.scenes.find((s) => s.name === "story").next.kind,
+    "unlinked",
+  );
+  assert.equal(p.scenes.find((s) => s.name === "ending").next.kind, "unlinked");
+  assert.deepEqual(migrate(copy), copy);
+});
