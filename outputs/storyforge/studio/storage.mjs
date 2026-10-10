@@ -54,7 +54,8 @@ export class Storage {
   }
   setToken(token) {
     this.token = token.trim();
-    sessionStorage.setItem("storyforge-publish-token", this.token);
+    localStorage.setItem("storyforge-publish-token", this.token);
+    sessionStorage.removeItem("storyforge-publish-token");
   }
   headers(extra = {}) {
     return { Authorization: `Bearer ${this.token}`, ...extra };
