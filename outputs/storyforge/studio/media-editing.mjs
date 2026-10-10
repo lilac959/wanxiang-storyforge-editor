@@ -1,4 +1,5 @@
 import { duration } from "./model.mjs";
+import { shiftKeyframeOrigin, retimeKeyframes } from "./keyframes.mjs";
 import {
   ensureSequence,
   clipLength,
@@ -34,6 +35,7 @@ export function setMediaSpeed(scene, item, rate, kind = "clip") {
   const ratio = oldRate / rate,
     delta = length - oldLength;
   for (const x of linked(scene, item.id)) {
+    retimeKeyframes(x, ratio);
     x.startMs = Math.round(start + (x.startMs - start) * ratio);
     x.endMs = Math.round(start + (x.endMs - start) * ratio);
   }
@@ -87,6 +89,8 @@ export function splitRange(scene, item, kind, time) {
   const right = structuredClone(item);
   right.id = `${kind}-${crypto.randomUUID()}`;
   right.startMs = Math.round(time);
+  if (kind === "event")
+    shiftKeyframeOrigin(right, right.startMs - item.startMs);
   if (["audio", "overlay"].includes(kind))
     right.inMs = Math.round(
       (item.inMs || 0) + (time - item.startMs) * mediaRate(item),

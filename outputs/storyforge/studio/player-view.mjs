@@ -22,6 +22,7 @@ import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
 import { uiTransformStyle, captionBoxStyle } from "./canvas-transform.mjs";
+import { eventTransform } from "./keyframes.mjs";
 import { firstVideoFrame, nativeOpeningLoop } from "./media-ready.mjs";
 import { UI_IMAGES } from "./preload.mjs";
 
@@ -1154,7 +1155,40 @@ export class PlayerView {
         !!this.runtime?.operating &&
         this.runtime.operating.event.id !== event.id;
       this.paintEvent(event, host);
+      this.paintEventTransform(event, host);
     }
+  }
+  paintEventTransform(event, host) {
+    const time = this.editing
+      ? (this.still?.time ?? event.startMs)
+      : (this.runtime?.timeMs ?? event.startMs);
+    const paint = (el, item, option) => {
+      if (!el) return;
+      const value = eventTransform(event, item, time);
+      if (option) el.style.translate = `${value.x}cqw ${value.y}cqw`;
+      else {
+        el.style.left = `${value.x}%`;
+        el.style.top = `${value.y}%`;
+      }
+      const scale = (value.scale ?? 100) / 100;
+      el.style.setProperty("--scale", scale);
+      el.style.setProperty(
+        "--scale-x",
+        (scale * (value.stretchX ?? 100)) / 100,
+      );
+      el.style.setProperty(
+        "--scale-y",
+        (scale * (value.stretchY ?? 100)) / 100,
+      );
+    };
+    if (event.kind === "choice")
+      for (const item of event.options) {
+        const el = [...host.querySelectorAll("[data-option-id]")].find(
+          (el) => el.dataset.optionId === item.id,
+        );
+        paint(el, item, true);
+      }
+    else paint(host.querySelector(".hotspot,.qte"), event, false);
   }
   paintEvent(event, host) {
     const key = event

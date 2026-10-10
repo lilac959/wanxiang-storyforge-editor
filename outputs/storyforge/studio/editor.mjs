@@ -17,6 +17,18 @@ import {
   restoreAudio,
 } from "./timeline-shortcuts.mjs";
 import { timelineEntries } from "./timeline-selection.mjs";
+import {
+  KEYFRAME_PROPERTIES,
+  EASINGS,
+  eventTransform,
+  localTime,
+  putKeyframe,
+  writeTransform,
+  removeKeyframe,
+  shiftKeyframeOrigin,
+  keyframePoints,
+  moveKeyframePoint,
+} from "./keyframes.mjs";
 let timelineProperties = null;
 import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
 import {
@@ -214,6 +226,12 @@ function mutate(label, fn) {
     history.commit(label, (project) => {
       for (const scene of project.scenes) materializeTracks(scene);
       const editedScene = project.scenes.find((c) => c.id === selected);
+      const animationOrigins = new Map(
+        (editedScene?.events || []).map((e) => [
+          e.id,
+          { start: e.startMs, end: e.endMs },
+        ]),
+      );
       const lockedBefore =
         page === "story" && !graph && editedScene
           ? new Map(
@@ -233,6 +251,15 @@ function mutate(label, fn) {
           )
         : null;
       fn(project);
+      for (const event of editedScene?.events || []) {
+        const before = animationOrigins.get(event.id);
+        if (
+          before &&
+          event.endMs === before.end &&
+          event.startMs !== before.start
+        )
+          shiftKeyframeOrigin(event, event.startMs - before.start);
+      }
       if (
         page === "story" &&
         !graph &&
@@ -459,7 +486,9 @@ function shell() {
         const event = selectObject();
         const item =
           event.options?.find((o) => o.id === selection.optionId) || event;
-        Object.assign(item, patch);
+        if (selection.kind === "event")
+          writeTransform(event, item, time, patch);
+        else Object.assign(item, patch);
       });
     },
     cancel: () => {
@@ -825,6 +854,7 @@ function renderTimeline() {
       )}<div class="playhead"><button class="playhead-grip" aria-label="拖动播放头" title="拖动播放头"></button><span class="playhead-time"></span></div></div>`;
   $(".timeline-scroll").scrollLeft = scroll;
   updatePlayhead();
+  renderKeyframeTimeline();
   paintTimelineMedia();
 }
 function updatePlayhead() {
@@ -839,6 +869,7 @@ function updatePlayhead() {
     : null;
   const button = $('.timeline-head [data-action="split-clip"]');
   if (button) button.disabled = !canSplitSelected();
+  refreshKeyframeControls();
 }
 function renderInspector() {
   const panel = $(".inspector"),
@@ -846,6 +877,7 @@ function renderInspector() {
       panel.querySelector(".inspector-body")?.scrollTop || panel.scrollTop;
   renderInspectorContent();
   organizeProperties(panel);
+  addKeyframeControls(panel);
   fixInspectorHeader();
   if (page === "story" && graph) {
     const close = document.createElement("button");
@@ -1909,6 +1941,7 @@ function pick(context) {
   $("#assetFiles").click();
 }
 async function handleAction(action, button) {
+  if (action.startsWith("kf-")) return keyframeAction(action, button);
   if (action === "add-library-item") {
     if (button.dataset.kind === "ui") return handleAction("use-ui", button);
     if (page !== "story" || graph) {
@@ -3178,7 +3211,7 @@ function timelinePointer(e) {
   if (e.button === 1) return beginTimelinePan(e);
   if (e.button !== 0 || e.target.closest("[data-action]")) return;
   e.currentTarget.tabIndex = 0;
-  e.currentTarget.focus({preventScroll:true});
+  e.currentTarget.focus({ preventScroll: true });
   let clip = e.target.closest("[data-clip]");
   if (
     clip &&
@@ -3770,6 +3803,23 @@ document.addEventListener("click", async (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
+  if (el.dataset.keyframeEasing) {
+    try {
+      assertTimelineUnlocked();
+      mutate("调整关键帧曲线", () => {
+        const event = selectObject(),
+          item = keyframeItem(event, el.dataset.optionId);
+        const frame = item.keyframes?.[el.dataset.keyframeEasing]?.find(
+          (f) => f.timeMs === localTime(event, item, time),
+        );
+        if (frame && Object.hasOwn(EASINGS, el.value)) frame.easing = el.value;
+      });
+    } catch (error) {
+      notify(error.message);
+      renderInspector();
+    }
+    return;
+  }
   if (!el.dataset.field || !history) return;
   const path = el.dataset.field,
     scope = el.dataset.scope;
@@ -3850,7 +3900,20 @@ document.addEventListener("change", (e) => {
         obj.layout ||= {};
         obj.layout[openingPart] ||= openingDefaults(openingPart);
       }
-      set(obj, path, value);
+      const transformPath = path.match(
+        /^(?:options\.(\d+)\.)?(x|y|scale|stretchX|stretchY)$/,
+      );
+      if (
+        scope === "selection" &&
+        selection.kind === "event" &&
+        transformPath
+      ) {
+        const item =
+          transformPath[1] != null
+            ? obj.options[Number(transformPath[1])]
+            : obj;
+        writeTransform(obj, item, time, { [transformPath[2]]: value });
+      } else set(obj, path, value);
       if (
         ["startMs", "endMs"].includes(path) &&
         ["subtitle", "overlay", "audio", "event"].includes(selection.kind)
@@ -5891,13 +5954,276 @@ function markPreviewSelection() {
   if (option) selection.optionId = option;
   canvasTransform?.select(
     target,
-    option ? event?.options?.find((o) => o.id === option) : event,
+    selection.kind === "event" && event
+      ? eventTransform(
+          event,
+          option ? event.options.find((o) => o.id === option) : event,
+          time,
+        )
+      : event,
     selection.kind,
     !!option,
   );
 }
 function stretchFields(obj, prefix = "") {
   return `<div class="two">${field("横向拉伸 %", prefix + "stretchX", obj.stretchX ?? 100, { type: "number", min: 5, max: 400, step: 1 })}${field("纵向拉伸 %", prefix + "stretchY", obj.stretchY ?? 100, { type: "number", min: 5, max: 400, step: 1 })}</div>`;
+}
+function keyframeItem(event, optionId) {
+  return event?.options?.find((o) => o.id === optionId) || event;
+}
+function selectedKeyframeEvent() {
+  return page === "story" && !graph && selection.kind === "event"
+    ? selectObject()
+    : null;
+}
+function addKeyframeControls(panel) {
+  const event = selectedKeyframeEvent();
+  if (!event) return;
+  const targets = event.kind === "choice" ? event.options : [event];
+  for (const [index, item] of targets.entries()) {
+    const prefix = event.kind === "choice" ? `options.${index}.` : "";
+    for (const [property, spec] of Object.entries(KEYFRAME_PROPERTIES)) {
+      const input = panel.querySelector(
+        `[data-field="${prefix + spec.keys[0]}"]`,
+      );
+      if (!input) continue;
+      input.setAttribute(
+        "aria-label",
+        input.closest(".field").firstChild.textContent.trim(),
+      );
+      const controls = document.createElement("div");
+      controls.className = "keyframe-controls";
+      controls.dataset.keyframeProperty = property;
+      controls.dataset.optionId = item === event ? "" : item.id;
+      const attrs = `data-property="${property}" data-option-id="${item === event ? "" : esc(item.id)}"`;
+      controls.innerHTML = `<button type="button" data-action="kf-previous" ${attrs} aria-label="上一个${spec.label}关键帧">‹</button><button type="button" data-action="kf-toggle" ${attrs} aria-label="添加${spec.label}关键帧">◇</button><button type="button" data-action="kf-next" ${attrs} aria-label="下一个${spec.label}关键帧">›</button><details class="keyframe-more"><summary aria-label="关键帧更多操作">⋯</summary><div><select data-keyframe-easing="${property}" data-option-id="${item === event ? "" : esc(item.id)}" aria-label="${spec.label}关键帧曲线">${Object.entries(
+        EASINGS,
+      )
+        .map(([value, label]) => `<option value="${value}">${label}</option>`)
+        .join(
+          "",
+        )}</select><button type="button" data-action="kf-clear" ${attrs} title="清除该属性动画，保留当前值" aria-label="清除${spec.label}关键帧">清除</button></div></details>`;
+      const field = input.closest(".field");
+      const wrapper = document.createElement("div");
+      wrapper.className = "keyframe-field";
+      field.before(wrapper);
+      wrapper.append(field, controls);
+    }
+  }
+  refreshKeyframeControls();
+}
+function refreshKeyframeControls() {
+  const event = selectedKeyframeEvent();
+  if (!event || canvasTransform?.active) return;
+  const locked = timelineLockedIds().has(event.id);
+  for (const controls of document.querySelectorAll(".keyframe-controls")) {
+    const item = keyframeItem(event, controls.dataset.optionId),
+      property = controls.dataset.keyframeProperty;
+    const at = localTime(event, item, time),
+      frames = item.keyframes?.[property] || [];
+    const current = frames.find((f) => f.timeMs === at);
+    const toggle = controls.querySelector('[data-action="kf-toggle"]');
+    toggle.textContent = current ? "◆" : "◇";
+    toggle.setAttribute("aria-pressed", String(!!current));
+    toggle.setAttribute(
+      "aria-label",
+      `${current ? "删除" : "添加"}${KEYFRAME_PROPERTIES[property].label}关键帧`,
+    );
+    toggle.disabled = locked || time < event.startMs || time > event.endMs;
+    controls.querySelector('[data-action="kf-previous"]').disabled =
+      !frames.some(
+        (f) => f.timeMs < at && f.timeMs >= (item.keyframeOffsetMs || 0),
+      );
+    controls.querySelector('[data-action="kf-next"]').disabled = !frames.some(
+      (f) =>
+        f.timeMs > at &&
+        f.timeMs <= (item.keyframeOffsetMs || 0) + event.endMs - event.startMs,
+    );
+    controls.querySelector('[data-action="kf-clear"]').disabled =
+      locked || !frames.length;
+    const easing = controls.querySelector("select");
+    easing.disabled = locked || !current;
+    if (document.activeElement !== easing)
+      easing.value = current?.easing || "linear";
+  }
+  for (const [index, item] of (event.kind === "choice"
+    ? event.options
+    : [event]
+  ).entries()) {
+    const evaluated = eventTransform(event, item, time);
+    const prefix = event.kind === "choice" ? `options.${index}.` : "";
+    for (const key of ["x", "y", "scale", "stretchX", "stretchY"]) {
+      const input = $(".inspector").querySelector(
+        `[data-field="${prefix + key}"]`,
+      );
+      if (input && document.activeElement !== input)
+        input.value = Math.round((evaluated[key] ?? 100) * 100) / 100;
+    }
+  }
+  for (const dot of document.querySelectorAll(".keyframe-dot")) {
+    const item = keyframeItem(event, dot.dataset.optionId);
+    const frame = item.keyframes?.[dot.dataset.property]?.find(
+      (f) => f.id === dot.dataset.keyframeId,
+    );
+    dot.classList.toggle(
+      "active",
+      frame?.timeMs === localTime(event, item, time),
+    );
+  }
+}
+function keyframeAction(action, button) {
+  const event = selectedKeyframeEvent();
+  if (!event) return;
+  stopTimelinePlayback();
+  const { property, optionId, keyframeId } = button.dataset;
+  const item = keyframeItem(event, optionId),
+    at = localTime(event, item, time),
+    frames = item.keyframes?.[property] || [];
+  const frame = keyframeId
+    ? frames.find((f) => f.id === keyframeId)
+    : frames.find((f) => f.timeMs === at);
+  if (
+    action === "kf-goto" ||
+    action === "kf-previous" ||
+    action === "kf-next"
+  ) {
+    const start = item.keyframeOffsetMs || 0,
+      end = start + event.endMs - event.startMs;
+    const visible = frames.filter((f) => f.timeMs >= start && f.timeMs <= end);
+    const destination =
+      action === "kf-goto"
+        ? frame
+        : action === "kf-previous"
+          ? visible.findLast((f) => f.timeMs < at)
+          : visible.find((f) => f.timeMs > at);
+    if (destination) {
+      time = event.startMs + destination.timeMs - start;
+      updatePlayhead();
+      queueStill();
+      followPlayhead();
+    }
+    return;
+  }
+  assertTimelineUnlocked(new Set([event.id]));
+  if (time < event.startMs || time > event.endMs)
+    throw Error("请将播放头放在互动片段范围内");
+  mutate("编辑互动关键帧", () => {
+    if (action === "kf-clear") {
+      const value = eventTransform(event, item, time);
+      for (const key of KEYFRAME_PROPERTIES[property].keys)
+        item[key] = value[key];
+      if (item.keyframes) delete item.keyframes[property];
+    } else if (action === "kf-delete" && button.dataset.keyframeGroup) {
+      for (const ref of JSON.parse(button.dataset.keyframeGroup))
+        removeKeyframe(keyframeItem(event, ref.optionId), ref.property, ref.id);
+    } else if (frame) removeKeyframe(item, property, frame.id);
+    else putKeyframe(item, property, at);
+  });
+}
+function renderKeyframeTimeline() {
+  const event = selectedKeyframeEvent();
+  if (!event) return;
+  const clip = [...$(".timeline-scroll").querySelectorAll("[data-clip]")].find(
+    (el) => el.dataset.clip === event.id,
+  );
+  const points = keyframePoints(event);
+  if (!clip || !points.length) return;
+  clip.classList.add("has-keyframes");
+  const strip = document.createElement("div");
+  strip.className = "keyframe-strip";
+  strip.innerHTML = points
+    .map((point) => {
+      const first = point.refs[0];
+      const label = [
+        ...new Set(
+          point.refs.map((ref) => KEYFRAME_PROPERTIES[ref.property].label),
+        ),
+      ].join("、");
+      const seconds = ((event.startMs + point.timeMs) / 1000).toFixed(3);
+      return `<button type="button" class="keyframe-dot" data-action="kf-goto" data-property="${first.property}" data-option-id="${esc(first.optionId)}" data-keyframe-id="${esc(first.id)}" data-keyframe-group="${esc(JSON.stringify(point.refs))}" style="left:${(point.timeMs / Math.max(1, event.endMs - event.startMs)) * 100}%" title="${esc(label)} · ${seconds} 秒" aria-label="${esc(label)}关键帧 ${seconds} 秒">◆</button>`;
+    })
+    .join("");
+  strip.addEventListener("pointerdown", keyframePointer);
+  strip.addEventListener("keydown", (e) => {
+    if (e.key !== "Backspace" || !e.target.dataset.keyframeId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      keyframeAction("kf-delete", e.target);
+    } catch (error) {
+      notify(error.message);
+    }
+  });
+  clip.append(strip);
+  refreshKeyframeControls();
+}
+function keyframePointer(e) {
+  const dot = e.target.closest(".keyframe-dot"),
+    event = selectedKeyframeEvent();
+  if (!dot || !event || e.button !== 0) return;
+  try {
+    assertTimelineUnlocked(new Set([event.id]));
+  } catch (error) {
+    notify(error.message);
+    return;
+  }
+  stopTimelinePlayback();
+  const item = keyframeItem(event, dot.dataset.optionId);
+  const frame = item.keyframes[dot.dataset.property].find(
+    (f) => f.id === dot.dataset.keyframeId,
+  );
+  const refs = JSON.parse(dot.dataset.keyframeGroup);
+  const rect = dot.parentElement.getBoundingClientRect(),
+    duration = event.endMs - event.startMs,
+    original = frame.timeMs - (item.keyframeOffsetMs || 0);
+  const originX = e.clientX;
+  const controller = new AbortController();
+  let moved = false,
+    destination = original;
+  const cleanup = () => {
+    controller.abort();
+    cancelTimelineGesture = null;
+  };
+  cancelTimelineGesture = () => {
+    cleanup();
+    dot.style.left = (original / Math.max(1, duration)) * 100 + "%";
+  };
+  window.addEventListener(
+    "pointermove",
+    (move) => {
+      if (!moved && Math.abs(move.clientX - originX) < 4) return;
+      moved = true;
+      destination = clamp(
+        Math.round(((move.clientX - rect.left) / rect.width) * duration),
+        0,
+        duration,
+      );
+      dot.style.left = (destination / Math.max(1, duration)) * 100 + "%";
+      dot.title = ((event.startMs + destination) / 1000).toFixed(3) + " 秒";
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener(
+    "pointerup",
+    () => {
+      cleanup();
+      if (!moved) return;
+      suppressClick = true;
+      try {
+        mutate("移动互动关键帧", () =>
+          moveKeyframePoint(event, refs, destination),
+        );
+      } catch (error) {
+        renderTimeline();
+        notify(error.message);
+      }
+    },
+    { once: true, signal: controller.signal },
+  );
+  window.addEventListener("pointercancel", () => cancelTimelineGesture?.(), {
+    once: true,
+    signal: controller.signal,
+  });
 }
 function organizeProperties(panel) {
   if (page !== "story" || graph) return;

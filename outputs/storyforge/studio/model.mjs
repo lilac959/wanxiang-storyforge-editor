@@ -1,5 +1,6 @@
 import { visualClips, clipLength, mediaRate } from "./timeline.mjs";
 import { interactionConflicts } from "./tracks.mjs";
+import { keyframeError } from "./keyframes.mjs";
 export const SCHEMA = 3;
 export const clone = (value) => structuredClone(value);
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
@@ -1053,6 +1054,10 @@ export function validate(p, { publish = false } = {}) {
         return issues;
       }
       unique(e.id, "互动", s.id);
+      const animationError =
+        keyframeError(e) ||
+        e.options.map((o) => keyframeError(o, true)).find(Boolean);
+      if (animationError) error(animationError, s.id);
       if (
         !["choice", "qte", "hotspot"].includes(e.kind) ||
         !integer(e.startMs) ||
