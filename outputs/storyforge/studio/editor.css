@@ -2542,6 +2542,105 @@ body[data-view="scene"] .layout > .inspector-resize {
   outline: 2px solid #8973f3;
   outline-offset: 5px;
 }
+.canvas:has(.canvas-transform:not([hidden])) .editor-selected {
+  outline: none;
+}
+.canvas-transform {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11000;
+}
+.canvas-transform[hidden],
+.transform-guide[hidden] {
+  display: none;
+}
+.transform-box {
+  position: absolute;
+  outline: 1px solid #8973f3;
+  cursor: move;
+  pointer-events: auto;
+  touch-action: none;
+}
+.transform-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  min-width: 0;
+  padding: 0;
+  border: 2px solid #8973f3;
+  border-radius: 2px;
+  background: white;
+  translate: -50% -50%;
+  touch-action: none;
+  z-index: 1;
+}
+.transform-handle::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+}
+.handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.handle-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.handle-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.handle-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.handle-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.transform-guide {
+  position: absolute;
+  background: #e5d6b1;
+  pointer-events: none;
+}
+.guide-x {
+  width: 1px;
+}
+.guide-y {
+  height: 1px;
+}
+.transform-size {
+  position: absolute;
+  padding: 3px 6px;
+  background: #302848dd;
+  border-radius: 3px;
+  color: white;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 .clip.fixed-duration {
   border-radius: 5px;
   border-style: solid;

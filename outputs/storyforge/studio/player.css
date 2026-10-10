@@ -135,6 +135,13 @@ button:disabled {
   background: #0009;
   border-radius: 4px;
 }
+.captions span.caption-box {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
 .interaction button,
 .interaction [data-edit-event] {
   pointer-events: auto;
@@ -1016,7 +1023,10 @@ button:disabled {
 }
 
 .qte.psd-qte {
-  transform: scale(var(--scale, 1));
+  transform: scale(
+    var(--scale-x, var(--scale, 1)),
+    var(--scale-y, var(--scale, 1))
+  );
   pointer-events: none;
   --qte-progress: 0;
 }
@@ -1119,11 +1129,14 @@ button:disabled {
   color: #e5d6b1;
 }
 .play-stage .hotspot {
-  scale: var(--scale, 1);
+  scale: var(--scale-x, var(--scale, 1)) var(--scale-y, var(--scale, 1));
   width: 5cqw;
   height: 5cqw;
   font-size: 2.5cqw;
   border-width: 0.15cqw;
+}
+.play-stage .choices button {
+  scale: var(--scale-x, 1) var(--scale-y, 1);
 }
 .play-stage .scene-title h2 {
   font-size: 4cqw;

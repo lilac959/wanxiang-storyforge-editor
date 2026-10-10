@@ -21,6 +21,7 @@ import {
 import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
+import { uiTransformStyle, captionBoxStyle } from "./canvas-transform.mjs";
 
 export class PlayerView {
   constructor(
@@ -161,6 +162,7 @@ export class PlayerView {
         this.onSelect(
           select.dataset.editEvent || select.dataset.editItem,
           select.dataset.editKind || "event",
+          select.dataset.optionId,
         );
     };
     root.addEventListener("click", this.clickHandler);
@@ -501,14 +503,16 @@ export class PlayerView {
   async mount(scene, time = 0) {
     const current = mediaAt(scene, time);
     if (
-      !this.loading && this.video &&
+      !this.loading &&
+      this.video &&
       this.mountedSceneId === scene.id &&
       continuousVideo(this.currentClip, current)
     ) {
       this.currentClip = current;
       this.mountedClipId = current.id;
       this.video.volume = current.volume ?? 1;
-      this.video.muted = this.muted || !!current.audioDetached || scene.role === "loading";
+      this.video.muted =
+        this.muted || !!current.audioDetached || scene.role === "loading";
       this.video.playbackRate = (this.runtime?.rate ?? 1) * mediaRate(current);
       const wanted = sourceTime(current, time) / 1000;
       // Normal forward playback retains its decoded frames; explicit jumps seek.
@@ -958,7 +962,7 @@ export class PlayerView {
     const html = captions
       .map(
         (c) =>
-          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="opacity:${c.entryMotion === "fade" ? clamp((time - c.startMs) / 250, 0, 1) : 1};z-index:${visualLayer(scene, c)};left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color}" class="${c.background ? "caption-bg" : ""}">${esc(c.text)}</span>`,
+          `<span ${this.editing ? `data-edit-item="${esc(c.id)}" data-edit-kind="subtitle"` : ""} style="opacity:${c.entryMotion === "fade" ? clamp((time - c.startMs) / 250, 0, 1) : 1};z-index:${visualLayer(scene, c)};left:${c.x}%;top:${c.y}%;font-size:${c.size / 19.2}cqw;color:${c.color};${captionBoxStyle(c)}" class="${c.background ? "caption-bg" : ""} ${c.width != null || c.height != null ? "caption-box" : ""}">${esc(c.text)}</span>`,
       )
       .join("");
     const host = this.root.querySelector(".captions");
@@ -1120,14 +1124,14 @@ export class PlayerView {
       const opts = this.editing
         ? event.options
         : this.runtime.visibleOptions(event.id);
-      host.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
+      host.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw;${uiTransformStyle(o)}"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
       if (!opts.length && !this.editing)
         this.showError("当前条件下没有可用选项，请联系作品作者");
     } else if (event.kind === "hotspot")
-      host.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%;--scale:${(event.scale ?? 100) / 100}" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
+      host.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%;${uiTransformStyle(event)}" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
     else {
       const glyph = GESTURE_PATHS[event.gesture] || GESTURE_PATHS.click;
-      host.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;
+      host.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;${uiTransformStyle(event)}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;
     }
   }
   paintHud() {

@@ -975,7 +975,9 @@ export function validate(p, { publish = false } = {}) {
       if (
         !finite(x.x, 0, 100) ||
         !finite(x.y, 0, 100) ||
-        !finite(x.size, 12, 80) ||
+        !finite(x.size, 12, 300) ||
+        (x.width != null && !finite(x.width, 0.5, 100)) ||
+        (x.height != null && !finite(x.height, 0.5, 100)) ||
         !/^#[a-f0-9]{6}$/i.test(x.color)
       )
         error("字幕位置或样式无效", s.id);
@@ -1071,6 +1073,8 @@ export function validate(p, { publish = false } = {}) {
         !finite(e.x, 0, 100) ||
         !finite(e.y, 0, 100) ||
         !finite(e.scale, 5, 180) ||
+        (e.stretchX != null && !finite(e.stretchX, 5, 400)) ||
+        (e.stretchY != null && !finite(e.stretchY, 5, 400)) ||
         !finite(e.volume, 0, 1) ||
         !Object.hasOwn(gestures, e.gesture) ||
         !integer(e.holdMs) ||
@@ -1118,6 +1122,12 @@ export function validate(p, { publish = false } = {}) {
         actions(o.actions, s.id);
         if (!finite(o.x, -100, 100) || !finite(o.y, -100, 100))
           error("选项偏移无效", s.id);
+        if (
+          (o.scale != null && !finite(o.scale, 5, 180)) ||
+          (o.stretchX != null && !finite(o.stretchX, 5, 400)) ||
+          (o.stretchY != null && !finite(o.stretchY, 5, 400))
+        )
+          error("选项尺寸无效", s.id);
         if (!o.text.trim()) error("选项文字不能为空", s.id);
       }
       if (

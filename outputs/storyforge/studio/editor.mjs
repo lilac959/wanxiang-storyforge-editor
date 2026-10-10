@@ -97,6 +97,7 @@ import {
 import { History } from "./history.mjs";
 import { repairTechnicalData, describeIssues } from "./check-project.mjs";
 import { PlayerView } from "./player-view.mjs";
+import { CanvasTransform } from "./canvas-transform.mjs";
 import { Session } from "./session.mjs";
 
 const $ = (s) => document.querySelector(s),
@@ -133,6 +134,7 @@ let storage = new Storage(assets, status),
   busy = false,
   dirty = false,
   previewSession;
+let canvasTransform;
 const mediaLibrary = new AssetLibrary(assets, (id, kind) =>
   previewAsset(id, kind).catch((e) => notify(e.message)),
 );
@@ -364,14 +366,49 @@ function shell() {
   setupEditingLayout();
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
-    onSelect: (id, kind = "event") => {
-      selection = { kind, id };
+    onSelect: (id, kind = "event", optionId) => {
+      selection = { kind, id, optionId };
       timelineSelection.clear();
       timelineSelection.add(id);
       renderInspector();
       renderTimeline();
       revealTimelineItem(id);
       markPreviewSelection();
+    },
+  });
+  canvasTransform = new CanvasTransform($(".canvas"), {
+    begin: () => {
+      try {
+        assertTimelineUnlocked();
+      } catch (error) {
+        notify(error.message);
+        return false;
+      }
+      stopTimelinePlayback();
+    },
+    snap: () => snapEnabled,
+    preview: (patch) => {
+      const event = selectObject();
+      const index =
+        event.options?.findIndex((o) => o.id === selection.optionId) ?? -1;
+      for (const [key, value] of Object.entries(patch)) {
+        const path = index >= 0 ? `options.${index}.${key}` : key;
+        const input = $(".inspector").querySelector(`[data-field="${path}"]`);
+        if (input) input.value = value;
+      }
+    },
+    commit: (patch) => {
+      suppressClick = true;
+      mutate("调整画面元素尺寸与位置", () => {
+        const event = selectObject();
+        const item =
+          event.options?.find((o) => o.id === selection.optionId) || event;
+        Object.assign(item, patch);
+      });
+    },
+    cancel: () => {
+      renderInspector();
+      paintStill();
     },
   });
   $(".canvas").addEventListener("dragover", (e) => {
@@ -925,6 +962,7 @@ function renderInspectorContent() {
           max: 180,
           step: 5,
         }) +
+        stretchFields(obj) +
         field("入场动效", "entryMotion", obj.entryMotion || "classic", {
           options: { classic: "经典动效", fade: "淡入", none: "直接显示" },
         }) +
@@ -944,7 +982,7 @@ function renderInspectorContent() {
         obj.options
           .map(
             (o, i) =>
-              `<div class="option-card"><h4>选项 ${i + 1}</h4>${field("选项文字", `options.${i}.text`, o.text)}${targetFields("选择后", `options.${i}.target`, o.target)}<div class="two">${field("水平偏移 %", `options.${i}.x`, o.x, { type: "number", step: 0.1, min: -100, max: 100 })}${field("垂直偏移 %", `options.${i}.y`, o.y, { type: "number", step: 0.1, min: -100, max: 100 })}</div>${conditionFields(`options.${i}.condition`, o.condition)}${actionFields(`options.${i}.actions`, o.actions)}<button data-action="delete-option" data-id="${o.id}">删除选项</button></div>`,
+              `<div class="option-card"><h4>选项 ${i + 1}</h4>${field("选项文字", `options.${i}.text`, o.text)}${targetFields("选择后", `options.${i}.target`, o.target)}<div class="two">${field("水平偏移 %", `options.${i}.x`, o.x, { type: "number", step: 0.1, min: -100, max: 100 })}${field("垂直偏移 %", `options.${i}.y`, o.y, { type: "number", step: 0.1, min: -100, max: 100 })}</div>${field("选项大小 %", `options.${i}.scale`, o.scale ?? 100, { type: "number", min: 5, max: 180, step: 1 })}${stretchFields(o, `options.${i}.`)}${conditionFields(`options.${i}.condition`, o.condition)}${actionFields(`options.${i}.actions`, o.actions)}<button data-action="delete-option" data-id="${o.id}">删除选项</button></div>`,
           )
           .join("") +
         '<button class="full" data-action="add-option">＋ 添加选项</button>' +
@@ -966,8 +1004,9 @@ function renderInspectorContent() {
         field("字号（以 1920 宽画面为准）", "size", obj.size, {
           type: "number",
           min: 12,
-          max: 80,
+          max: 300,
         }) +
+        `<div class="two">${field("文本框宽度 %（留空自动）", "width", obj.width ?? "", { type: "number", min: 0.5, max: 100, step: 0.1 })}${field("文本框高度 %（留空自动）", "height", obj.height ?? "", { type: "number", min: 0.5, max: 100, step: 0.1 })}</div>` +
         field("横向位置 %", "x", obj.x, { type: "number", min: 0, max: 100 }) +
         field("纵向位置 %", "y", obj.y, { type: "number", min: 0, max: 100 }) +
         field("半透明文字底色", "background", obj.background, {
@@ -3467,6 +3506,7 @@ function canvasPointer(e) {
   selection = {
     kind: el.dataset.editKind || "event",
     id: el.dataset.editItem || el.dataset.editEvent,
+    optionId: el.dataset.optionId,
   };
   timelineSelection.clear();
   timelineSelection.add(selection.id);
@@ -3474,54 +3514,74 @@ function canvasPointer(e) {
   renderInspector();
   revealTimelineItem(selection.id);
   markPreviewSelection();
+  if (canvasTransform.target === el) canvasTransform.pointer(e, "move");
+  else if (selection.kind === "overlay") moveCanvasOverlay(e, el);
+}
+function moveCanvasOverlay(e, el) {
   try {
     assertTimelineUnlocked();
-  } catch {
+  } catch (error) {
+    notify(error.message);
     return;
   }
-  const event = selectObject(),
-    option = event.options?.find((x) => x.id === el.dataset.optionId),
-    obj = option || event,
-    before = { x: obj.x, y: obj.y },
-    rect = $(".canvas .play-stage").getBoundingClientRect(),
-    start = { x: e.clientX, y: e.clientY };
-  let dx = 0,
-    dy = 0;
-  const controller = new AbortController();
+  stopTimelinePlayback();
+  const obj = selectObject(),
+    before = { x: obj.x, y: obj.y };
+  const stage = $(".canvas .play-stage").getBoundingClientRect();
+  const original = el.getAttribute("style"),
+    controller = new AbortController();
+  let patch;
   window.addEventListener(
     "pointermove",
     (ev) => {
-      dx = ((ev.clientX - start.x) / rect.width) * 100;
-      dy = ((ev.clientY - start.y) / (option ? rect.width : rect.height)) * 100;
-      if (option)
-        el.style.translate = `${before.x + dx}cqw ${before.y + dy}cqw`;
-      else {
-        el.style.left = clamp(before.x + dx, 0, 100) + "%";
-        el.style.top = clamp(before.y + dy, 0, 100) + "%";
-      }
+      patch = {
+        x: +clamp(
+          before.x + ((ev.clientX - e.clientX) / stage.width) * 100,
+          0,
+          100,
+        ).toFixed(1),
+        y: +clamp(
+          before.y + ((ev.clientY - e.clientY) / stage.height) * 100,
+          0,
+          100,
+        ).toFixed(1),
+      };
+      el.style.left = patch.x + "%";
+      el.style.top = patch.y + "%";
     },
     { signal: controller.signal },
   );
-  const finish = (ev) => {
+  const finish = (save) => {
     controller.abort();
-    if (ev.type !== "pointercancel" && Math.abs(dx) + Math.abs(dy) > 0.1) {
+    el.setAttribute("style", original);
+    if (save && patch && (patch.x !== before.x || patch.y !== before.y)) {
       suppressClick = true;
-      mutate("调整画面元素位置", () => {
-        obj.x = +clamp(before.x + dx, option ? -100 : 0, 100).toFixed(1);
-        obj.y = +clamp(before.y + dy, option ? -100 : 0, 100).toFixed(1);
-      });
-    }
-    renderInspector();
-    paintStill();
+      mutate("移动叠加画面", () => Object.assign(selectObject(), patch));
+    } else paintStill();
   };
-  window.addEventListener("pointerup", finish, {
-    once: true,
+  window.addEventListener("pointerup", () => finish(true), {
     signal: controller.signal,
-  });
-  window.addEventListener("pointercancel", finish, {
     once: true,
-    signal: controller.signal,
   });
+  window.addEventListener("pointercancel", () => finish(false), {
+    signal: controller.signal,
+    once: true,
+  });
+  window.addEventListener("blur", () => finish(false), {
+    signal: controller.signal,
+    once: true,
+  });
+  window.addEventListener(
+    "keydown",
+    (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        finish(false);
+      }
+    },
+    { signal: controller.signal, capture: true },
+  );
 }
 document.addEventListener("click", async (e) => {
   if (suppressClick) {
@@ -3643,9 +3703,15 @@ document.addEventListener("change", (e) => {
         ? Number(el.value)
         : el.value;
   if (el.hasAttribute("data-ms")) value = ms(value);
+  if (
+    selection.kind === "subtitle" &&
+    ["width", "height"].includes(path) &&
+    el.value === ""
+  )
+    value = null;
   if (typeof get(obj, path) === "boolean")
     value = value === true || value === "true";
-  if (el.type === "number" && !Number.isFinite(value)) {
+  if (el.type === "number" && value !== null && !Number.isFinite(value)) {
     notify("请输入有效数值");
     return;
   }
@@ -5582,13 +5648,31 @@ function revealTimelineItem(id) {
   else if (a.bottom > b.bottom) scroll.scrollTop += a.bottom - b.bottom + 12;
 }
 function markPreviewSelection() {
+  let target;
   for (const el of $(".canvas").querySelectorAll(
     "[data-edit-event],[data-edit-item]",
-  ))
-    el.classList.toggle(
-      "editor-selected",
-      (el.dataset.editEvent || el.dataset.editItem) === selection.id,
-    );
+  )) {
+    const chosen =
+      (el.dataset.editEvent || el.dataset.editItem) === selection.id &&
+      (!el.dataset.optionId ||
+        el.dataset.optionId ===
+          (selection.optionId || selectObject()?.options?.[0]?.id));
+    el.classList.toggle("editor-selected", chosen);
+    if (chosen && (selection.kind === "subtitle" || selection.kind === "event"))
+      target = el;
+  }
+  const event = selectObject();
+  const option = target?.dataset.optionId;
+  if (option) selection.optionId = option;
+  canvasTransform?.select(
+    target,
+    option ? event?.options?.find((o) => o.id === option) : event,
+    selection.kind,
+    !!option,
+  );
+}
+function stretchFields(obj, prefix = "") {
+  return `<div class="two">${field("横向拉伸 %", prefix + "stretchX", obj.stretchX ?? 100, { type: "number", min: 5, max: 400, step: 1 })}${field("纵向拉伸 %", prefix + "stretchY", obj.stretchY ?? 100, { type: "number", min: 5, max: 400, step: 1 })}</div>`;
 }
 function organizeProperties(panel) {
   if (page !== "story" || graph) return;
@@ -5632,7 +5716,7 @@ function organizeProperties(panel) {
       )
         return "story";
       if (
-        /^(hint|x|y|scale|sound|volume|uiComponent|entryMotion)(\.|$)|^options\.\d+\.(text|x|y)/.test(
+        /^(hint|x|y|scale|stretchX|stretchY|sound|volume|uiComponent|entryMotion)(\.|$)|^options\.\d+\.(text|x|y|scale|stretchX|stretchY)/.test(
           path,
         )
       )
