@@ -68,16 +68,18 @@ export class PlayerView {
       if (
         editing ||
         this.menuOpen ||
-        this.runtime?.active?.event.kind === "qte" ||
+        this.runtime?.active ||
+        e?.defaultPrevented ||
         this.pointer ||
         performance.now() < (this.interactionUntil || 0)
       )
         return;
-      if (e?.type === "pointermove" && e.pointerType !== "mouse") return;
-      if (e?.target.closest("button,.interaction,.play-controls")) return;
+      if (
+        e?.target.closest("button,.interaction,.play-controls,.opening-start")
+      )
+        return;
       this.showSettingsButton();
     };
-    root.addEventListener("pointermove", this.reveal);
     root.addEventListener("click", this.reveal);
     this.menuKey = (e) => {
       if (editing) return;
@@ -104,7 +106,7 @@ export class PlayerView {
     this.settingsButton.addEventListener("focus", () =>
       this.showSettingsButton(),
     );
-    this.showSettingsButton();
+    this.showSettingsButton(2000);
     this.clickHandler = (e) => {
       const command = e.target.closest("[data-player]")?.dataset.player;
       if (command) {
@@ -307,19 +309,19 @@ export class PlayerView {
       ratio,
     );
     this.stageScale = fit.scale;
+    this.stage.style.setProperty("--control-scale", String(1 / fit.scale));
     this.stage.style.width = fit.width + "px";
     this.stage.style.height = fit.height + "px";
     this.stage.style.transform = `translate(-50%, -50%) scale(${fit.scale})`;
     this.fitOpeningLayer();
   }
-  showSettingsButton() {
+  showSettingsButton(delay = 3000) {
     if (this.editing) return;
     this.root.classList.add("settings-visible");
     clearTimeout(this.settingsTimer);
     this.settingsTimer = setTimeout(() => {
-      if (!this.menuOpen && document.activeElement !== this.settingsButton)
-        this.root.classList.remove("settings-visible");
-    }, 3000);
+      if (!this.menuOpen) this.root.classList.remove("settings-visible");
+    }, delay);
   }
   resetConfirmation() {
     this.confirmAction = null;
@@ -366,7 +368,7 @@ export class PlayerView {
     // Video and opening UI must render without waiting for that permission.
     qteAudio.unlock();
     this.runtime.start(sceneId, time);
-    this.showSettingsButton();
+    this.showSettingsButton(2000);
   }
   stop() {
     this.token++;
@@ -408,7 +410,6 @@ export class PlayerView {
     this.stop();
     this.disposed = true;
     clearTimeout(this.settingsTimer);
-    this.root.removeEventListener("pointermove", this.reveal);
     this.root.removeEventListener("click", this.reveal);
     document.removeEventListener("keydown", this.menuKey);
     cancelAnimationFrame(this.frame);

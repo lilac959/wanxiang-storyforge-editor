@@ -1278,16 +1278,28 @@ button:disabled {
   background: #070c0d;
 }
 .player-root .play-stage .settings-toggle {
-  left: 48px;
-  top: 48px;
-  width: 88px;
-  height: 88px;
-  padding: 20px;
-  z-index: 10020;
-}
-.player-root .play-stage .settings-toggle svg {
+  left: calc(max(14px, env(safe-area-inset-left)) * var(--control-scale, 1));
+  top: calc(max(14px, env(safe-area-inset-top)) * var(--control-scale, 1));
   width: 44px;
   height: 44px;
+  padding: 0;
+  background: transparent;
+  transform: scale(var(--control-scale, 1));
+  transform-origin: top left;
+  z-index: 10020;
+}
+.player-root .play-stage .settings-toggle::before {
+  content: "";
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #142123b3;
+  z-index: -1;
+}
+.player-root .play-stage .settings-toggle svg {
+  width: 18px;
+  height: 18px;
 }
 .player-root .play-stage .settings-shade {
   z-index: 10030;
