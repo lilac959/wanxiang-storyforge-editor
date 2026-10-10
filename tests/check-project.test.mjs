@@ -93,11 +93,11 @@ test("checks identify precise clips and root causes, detect nested interaction c
   s.events[1].endMs = 3000;
   s.events[2].endMs = 5000;
   const conflicts = describeIssues(p).filter((x) =>
-    x.message?.startsWith("互动区间重叠"),
+    x.message?.includes("遮挡"),
   );
   assert.equal(conflicts.length, 2);
   assert.equal(conflicts[1].relatedId, s.events[0].id);
-  assert.match(conflicts[1].detail, /字幕、叠加图片和音效可同时出现/);
+  assert.match(conflicts[1].detail, /两个互动可以同时出现/);
   s.events = [];
   assert.ok(!validate(p).some((x) => x.message.includes("互动区间重叠")));
 });

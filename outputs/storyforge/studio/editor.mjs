@@ -708,7 +708,7 @@ function renderTimeline() {
                 )
                 .map(
                   (c) =>
-                    `<button class="interaction-conflict" data-action="timeline-conflict" data-id="${esc(c.a.id)}" style="left:${(c.start / d) * 100}%;width:${Math.max(0.5, ((c.end - c.start) / d) * 100)}%" title="两个独立互动同时等待操作，点击查看">!</button>`,
+                    `<button class="interaction-conflict" data-action="timeline-conflict" data-id="${esc(c.a.id)}" style="left:${(c.start / d) * 100}%;width:${Math.max(0.5, ((c.end - c.start) / d) * 100)}%" title="${esc(c.message)}，点击查看">!</button>`,
                 )
                 .join("")
             : ""

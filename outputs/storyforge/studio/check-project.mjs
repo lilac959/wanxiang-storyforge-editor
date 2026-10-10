@@ -141,10 +141,13 @@ export function describeIssues(
     } else if (/超过素材时长/.test(title)) {
       detail = `素材：${label || "未指定"}，原素材时长 ${seconds(asset?.durationMs)}。请缩短截取范围或更换素材。系统不会替你决定保留哪一段。`;
       action = "前往片段";
-    } else if (title === "互动区间重叠，请安排为先后出现") {
-      title = "两个互动同时等待操作";
-      const other = s?.events.find((e) => e.id === issue.relatedId);
-      detail = `「${eventName(other)}」（${seconds(other?.startMs)}～${seconds(other?.endMs)}）与「${eventName(item)}」（${seconds(item?.startMs)}～${seconds(item?.endMs)}）重叠。当前播放器一次接收一个互动，请决定调整哪一个。字幕、叠加图片和音效可同时出现。`;
+    } else if (issue.code === "interaction-route-conflict") {
+      detail =
+        "两个互动会在同一时刻等待超时，却配置了不同的剧情去向。请统一失败去向或错开结束时间；轨道上下顺序不决定剧情。";
+      action = "前往互动时间轴";
+    } else if (title === "同时出现的互动位置接近，可能互相遮挡") {
+      detail =
+        "两个互动可以同时出现，但画面位置接近。请在预览画面调整位置；重叠区域由上方轨道的互动接收操作。";
       action = "前往互动时间轴";
     } else if (
       /未连接的剧情出口|连接的剧情节点不存在|剧情去向无效/.test(title)

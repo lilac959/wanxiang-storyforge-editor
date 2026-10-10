@@ -1,4 +1,5 @@
 import { visualClips, clipLength, mediaRate } from "./timeline.mjs";
+import { interactionConflicts } from "./tracks.mjs";
 export const SCHEMA = 3;
 export const clone = (value) => structuredClone(value);
 export const uid = (prefix = "id") => `${prefix}-${crypto.randomUUID()}`;
@@ -1126,20 +1127,17 @@ export function validate(p, { publish = false } = {}) {
       )
         error("至少保留一个无条件选项，防止没有可选路线", s.id);
     }
-    for (let i = 0; i < evs.length; i++)
-      for (let j = 0; j < i; j++)
-        if (
-          evs[i].startMs === evs[j].startMs ||
-          evs[i].startMs < evs[j].endMs
-        ) {
-          context = {
-            itemKind: "event",
-            itemId: evs[i].id,
-            relatedId: evs[j].id,
-            timeMs: evs[i].startMs,
-          };
-          error("互动区间重叠，请安排为先后出现", s.id);
-        }
+    for (const conflict of interactionConflicts(s)) {
+      context = {
+        itemKind: "event",
+        itemId: conflict.a.id,
+        relatedId: conflict.b.id,
+        timeMs: conflict.start,
+      };
+      if (conflict.kind === "route")
+        error(conflict.message, s.id, "interaction-route-conflict");
+      else warn(conflict.message, s.id);
+    }
     context = {};
   }
   if (issues.some((x) => x.code === "structure")) return issues;

@@ -32,7 +32,7 @@ test("demonstration has a playable video, subtitles, audio, two routes and disti
   assert.equal(p.scenes[0].events.length, 2);
   assert.ok(p.scenes[0].audio.length && p.scenes[0].subtitles.length);
 });
-test("schema rejects scripts, invalid targets, duplicate IDs and overlapping events", () => {
+test("schema rejects scripts, invalid targets, duplicate IDs; overlapping positions warn", () => {
   const p = project();
   const e = newEvent(1000);
   e.endMs = 4000;
@@ -47,7 +47,9 @@ test("schema rejects scripts, invalid targets, duplicate IDs and overlapping eve
   };
   const issues = validate(p);
   assert.ok(issues.some((x) => x.message.includes("重复")));
-  assert.ok(issues.some((x) => x.message.includes("重叠")));
+  assert.ok(
+    issues.some((x) => x.level === "warning" && x.message.includes("遮挡")),
+  );
   assert.ok(issues.some((x) => x.message.includes("不存在")));
   assert.ok(issues.some((x) => x.message.includes("地址")));
 });
@@ -330,4 +332,87 @@ test("unanswered interaction follows configured failure branch once", () => {
   r.start();
   advance(r, 2000);
   assert.equal(r.scene.id, next.id);
+});
+
+test("overlapping interactions remain independent across operation, pause, continuation and branch", () => {
+  const p = project(),
+    a = newEvent(1000),
+    b = newEvent(1000),
+    next = newScene("分支");
+  a.endMs = b.endMs = 6000;
+  a.timeoutMs = 2000;
+  a.success.target = a.failure.target = { kind: "continue" };
+  b.success.target = { kind: "scene", sceneId: next.id };
+  p.scenes[0].events = [a, b];
+  p.scenes.push(next);
+  const r = new Runtime(p);
+  r.start();
+  advance(r, 2000);
+  assert.equal(r.interactions.size, 2);
+  assert(r.selectInteraction(a.id));
+  r.beginOperation();
+  advance(r, 1000);
+  assert.equal(r.timeMs, 2000);
+  assert.equal(r.interactions.get(b.id).elapsedMs, 0);
+  assert.equal(r.selectInteraction(b.id), false);
+  assert.equal(r.resolve(true, null, b.id), false);
+  r.pause();
+  advance(r, 500);
+  r.resume();
+  assert.equal(r.interactions.get(a.id).elapsedMs, 1000);
+  assert(r.resolve(true, null, a.id));
+  assert.equal(r.interactions.size, 1);
+  assert.equal(r.mediaPaused, false);
+  advance(r, 500);
+  assert.equal(r.timeMs, 2500);
+  assert(r.selectInteraction(b.id));
+  assert(r.resolve(true));
+  assert.equal(r.scene.id, next.id);
+  assert.equal(r.interactions.size, 0);
+  assert.equal(r.resolve(true, null, a.id), false);
+  r.start();
+  advance(r, 2000);
+  r.selectInteraction(a.id);
+  r.beginOperation();
+  advance(r, 2000);
+  assert.equal(r.interactions.has(a.id), false);
+  assert.equal(r.interactions.has(b.id), true);
+  assert.equal(r.mediaPaused, false);
+});
+
+test("simultaneous deadlines allow continuation but never choose conflicting routes by layer order", () => {
+  const p = project(),
+    a = newEvent(1000),
+    b = newEvent(1000);
+  a.endMs = b.endMs = 3000;
+  a.x = 20;
+  b.x = 80;
+  a.failure.target = b.failure.target = { kind: "continue" };
+  p.scenes[0].events = [a, b];
+  assert.equal(validate(p).filter((x) => x.level === "error").length, 0);
+  const r = new Runtime(p);
+  r.start();
+  advance(r, 3000);
+  assert.equal(r.interactions.size, 0);
+  assert(r.playing);
+  a.failure.target = { kind: "end" };
+  b.failure.target = { kind: "seek", timeMs: 500 };
+  assert(validate(p).some((x) => x.code === "interaction-route-conflict"));
+  let conflict = false;
+  const c = new Runtime(p, (e) => {
+    if (e.type === "conflict") conflict = true;
+  });
+  c.start();
+  advance(c, 3000);
+  assert(conflict);
+  assert.equal(c.playing, false);
+  assert.equal(c.state, "playing");
+  // Nearby, distinct deadlines crossed in one frame still run in time order.
+  b.endMs = 3100;
+  p.scenes[0].events = [b, a];
+  const d = new Runtime(p);
+  d.start();
+  advance(d, 2900);
+  d.tick(250);
+  assert.equal(d.state, "complete");
 });

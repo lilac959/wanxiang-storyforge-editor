@@ -213,8 +213,40 @@ export function interactionConflicts(scene) {
         b = events[j],
         start = Math.max(a.startMs, b.startMs),
         end = Math.min(a.endMs, b.endMs);
-      if (Number.isFinite(start) && (start < end || a.startMs === b.startMs))
-        conflicts.push({ a, b, start, end: Math.max(start + 100, end) });
+      if (!Number.isFinite(start) || start >= end) continue;
+      const at = a.failure?.target,
+        bt = b.failure?.target;
+      if (
+        a.endMs === b.endMs &&
+        at &&
+        bt &&
+        at.kind !== "continue" &&
+        bt.kind !== "continue" &&
+        JSON.stringify([at, a.failure.timing]) !==
+          JSON.stringify([bt, b.failure.timing])
+      )
+        conflicts.push({
+          a,
+          b,
+          start,
+          end,
+          kind: "route",
+          message: "同时超时的互动配置了不同剧情去向",
+        });
+      if (
+        a.kind !== "choice" &&
+        b.kind !== "choice" &&
+        Math.abs(a.x - b.x) < 5 &&
+        Math.abs(a.y - b.y) < 5
+      )
+        conflicts.push({
+          a,
+          b,
+          start,
+          end,
+          kind: "occlusion",
+          message: "同时出现的互动位置接近，可能互相遮挡",
+        });
     }
   return conflicts;
 }

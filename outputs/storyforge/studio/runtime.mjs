@@ -19,12 +19,38 @@ export class Runtime {
     this.timeMs = 0;
     this.playing = false;
     this.processed = new Set();
-    this.active = null;
+    this.interactions = new Map();
+    this.selectedEventId = null;
     this.pending = null;
     this.suppressedSpeeds = new Set();
   }
   emit(type = "tick", detail = {}) {
     this.changed({ type, ...detail }, this);
+  }
+  get active() {
+    return (
+      this.interactions.get(this.selectedEventId) ||
+      this.interactions.values().next().value ||
+      null
+    );
+  }
+  set active(value) {
+    this.interactions.clear();
+    this.selectedEventId = value?.event.id || null;
+    if (value) this.interactions.set(value.event.id, value);
+  }
+  get operating() {
+    return [...this.interactions.values()].find((x) => x.operating);
+  }
+  selectInteraction(id) {
+    if (
+      !this.playing ||
+      !this.interactions.has(id) ||
+      (this.operating && this.operating.event.id !== id)
+    )
+      return false;
+    this.selectedEventId = id;
+    return true;
   }
   start(id = this.project.entryId, time = 0) {
     this.variables = clone(this.project.variables);
@@ -77,7 +103,7 @@ export class Runtime {
     this.emit("resume");
   }
   get mediaPaused() {
-    return !this.playing || !!this.active?.operating;
+    return !this.playing || !!this.operating;
   }
   beginOperation() {
     if (!this.playing || !this.active || this.active.operating) return;
@@ -97,11 +123,12 @@ export class Runtime {
       )?.value || 1
     );
   }
-  visibleOptions() {
+  visibleOptions(id = this.active?.event.id) {
     return (
-      this.active?.event.options.filter((o) =>
-        evaluate(o.condition, this.variables),
-      ) || []
+      this.interactions
+        .get(id)
+        ?.event.options.filter((o) => evaluate(o.condition, this.variables)) ||
+      []
     );
   }
   tick(realMs, mediaTime = null, buffering = false) {
@@ -110,7 +137,7 @@ export class Runtime {
     const token = this.generation,
       d = duration(this.scene),
       dt = clamp(realMs, 0, 250);
-    if (!this.active?.operating)
+    if (!this.operating)
       this.timeMs = clamp(
         Math.round(
           mediaTime === null ? this.timeMs + dt * this.rate : mediaTime,
@@ -118,18 +145,47 @@ export class Runtime {
         0,
         d,
       );
-    if (this.active) {
-      if (this.active.operating) this.active.elapsedMs += dt;
-      const e = this.active.event;
+    const expired = [];
+    for (const current of this.interactions.values()) {
+      if (current.operating) current.elapsedMs += dt;
+      const e = current.event;
       if (
-        (this.active.operating &&
-          this.active.elapsedMs >= (e.timeoutMs || 4000)) ||
-        (!this.active.operating && this.timeMs >= Math.min(e.endMs, d))
+        current.operating
+          ? current.elapsedMs >= (e.timeoutMs || 4000)
+          : !this.operating && this.timeMs >= Math.min(e.endMs, d)
       )
-        this.resolve(false);
+        expired.push(e);
     }
-    if (token !== this.generation) return;
-    if (!this.active && !openingRole(this.scene)) {
+    // Process deadlines chronologically, independent of track/array order.
+    const deadlines = [
+      ...new Set(expired.map((e) => Math.min(e.endMs, d))),
+    ].sort((a, b) => a - b);
+    for (const deadline of deadlines) {
+      const batch = expired.filter((e) => Math.min(e.endMs, d) === deadline);
+      const routes = new Set(
+        batch
+          .filter((e) => e.failure.target.kind !== "continue")
+          .map((e) => JSON.stringify([e.failure.target, e.failure.timing])),
+      );
+      if (routes.size > 1) {
+        this.pause();
+        this.emit("conflict", {
+          message:
+            "同时超时的互动配置了不同剧情去向，请在编辑器统一去向或错开结束时间。",
+        });
+        return;
+      }
+      batch.sort(
+        (a, b) =>
+          Number(a.failure.target.kind !== "continue") -
+          Number(b.failure.target.kind !== "continue"),
+      );
+      for (const e of batch) {
+        this.resolve(false, null, e.id);
+        if (token !== this.generation) return;
+      }
+    }
+    if (!openingRole(this.scene)) {
       const events = [...this.scene.events].sort(
         (a, b) => a.startMs - b.startMs,
       );
@@ -139,9 +195,13 @@ export class Runtime {
         this.processed.add(event.id);
         if (!evaluate(event.condition, this.variables)) continue;
         if (this.timeMs >= event.endMs) continue;
-        this.active = { event, elapsedMs: 0, progress: 0, operating: false };
-        this.emit("event");
-        break;
+        this.interactions.set(event.id, {
+          event,
+          elapsedMs: 0,
+          progress: 0,
+          operating: false,
+        });
+        this.emit("event", { event });
       }
     }
     if (!this.active && this.timeMs >= d) {
@@ -164,12 +224,18 @@ export class Runtime {
     }
     this.emit();
   }
-  resolve(ok, optionId = null) {
-    if (!this.playing || !this.active) return false;
-    const e = this.active.event;
+  resolve(ok, optionId = null, eventId = this.active?.event.id) {
+    const current = this.interactions.get(eventId);
+    if (
+      !this.playing ||
+      !current ||
+      (this.operating && this.operating !== current)
+    )
+      return false;
+    const e = current.event;
     let result = ok ? e.success : e.failure;
     if (e.kind === "choice" && ok) {
-      const o = this.visibleOptions().find((o) => o.id === optionId);
+      const o = this.visibleOptions(eventId).find((o) => o.id === optionId);
       if (!o) return false;
       result = {
         target: o.target,
@@ -178,7 +244,8 @@ export class Runtime {
         restoreSpeed: false,
       };
     }
-    this.active = null;
+    this.interactions.delete(eventId);
+    if (this.selectedEventId === eventId) this.selectedEventId = null;
     applyActions(result.actions, this.variables);
     if (result.restoreSpeed)
       for (const f of this.scene.effects)

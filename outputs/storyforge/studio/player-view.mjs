@@ -1,5 +1,5 @@
 import { audioVolume } from "./audio-envelope.mjs";
-import { visualLayer, itemTrackId } from "./tracks.mjs";
+import { visualLayer, itemTrackId, trackRows } from "./tracks.mjs";
 import { GESTURE_PATHS } from "./ui-components.mjs";
 import {
   mediaAt,
@@ -144,11 +144,17 @@ export class PlayerView {
       if (this.menuOpen) return;
       const choice = e.target.closest("[data-option-id]");
       if (choice && !this.editing) {
-        choice.classList.add("choice-confirmed");
-        this.runtime?.resolve(true, choice.dataset.optionId);
+        const id = choice.closest("[data-interaction-id]")?.dataset
+          .interactionId;
+        if (this.runtime?.selectInteraction(id))
+          this.runtime.resolve(true, choice.dataset.optionId, id);
       }
       const hot = e.target.closest("[data-hotspot]");
-      if (hot && !this.editing) this.runtime?.resolve(true);
+      if (hot && !this.editing) {
+        const id = hot.closest("[data-interaction-id]")?.dataset.interactionId;
+        if (this.runtime?.selectInteraction(id))
+          this.runtime.resolve(true, null, id);
+      }
       const select = e.target.closest("[data-edit-event],[data-edit-item]");
       if (select && this.editing)
         this.onSelect(
@@ -164,22 +170,29 @@ export class PlayerView {
         this.loading ||
         !this.runtime.active ||
         e.button !== 0 ||
-        e.target.closest("button")
+        e.target.closest("button") ||
+        this.pointer
       )
         return;
+      if (!e.target.closest(".qte")) return;
+      const id = e.target.closest("[data-interaction-id]")?.dataset
+        .interactionId;
+      if (!this.runtime.selectInteraction(id)) return;
       const event = this.runtime.active.event;
       if (event.kind !== "qte") return;
-      if (!e.target.closest(".qte")) return;
       e.preventDefault();
       if (event.gesture === "hold") this.runtime.beginOperation();
       this.pointer = {
         id: e.pointerId,
+        eventId: event.id,
         x: e.clientX,
         y: e.clientY,
         began: this.runtime.active.elapsedMs,
         scale: this.stageScale,
       };
-      this.hud.querySelector(".qte")?.classList.add("qte-input");
+      this.eventElement(event.id)
+        ?.querySelector(".qte")
+        ?.classList.add("qte-input");
       this.stage.setPointerCapture?.(e.pointerId);
       qteAudio.input(event.gesture);
     };
@@ -222,7 +235,9 @@ export class PlayerView {
         dx = e.clientX - p.x,
         dy = e.clientY - p.y,
         dist = Math.hypot(dx, dy) / Math.max(0.001, p.scale * 2);
-      this.hud.querySelector(".qte")?.classList.remove("qte-input");
+      this.eventElement(event.id)
+        ?.querySelector(".qte")
+        ?.classList.remove("qte-input");
       if (event.gesture === "click" && dist < 20) this.runtime.resolve(true);
       else if (event.gesture === "multi" && dist < 20) {
         this.runtime.beginOperation();
@@ -239,7 +254,9 @@ export class PlayerView {
     this.cancel = () => {
       this.pointer = null;
       if (this.runtime?.active) this.runtime.active.progress = 0;
-      this.hud.querySelector(".qte")?.classList.remove("qte-input");
+      this.hud
+        .querySelectorAll(".qte-input")
+        .forEach((el) => el.classList.remove("qte-input"));
       this.paintHud();
     };
     this.visibility = () => {
@@ -453,15 +470,12 @@ export class PlayerView {
       } else this.video.pause();
     }
     this.paintScene(scene, time);
-    const event =
-      !openingRole(scene) &&
-      (scene.events.find((e) => e.id === focusEvent) ||
-        scene.events.find(
-          (e) =>
-            time >= e.startMs &&
-            (time <= e.endMs || e.startMs === duration(scene)),
-        ));
-    this.paintEvent(event);
+    const events = openingRole(scene)
+      ? []
+      : scene.events.filter(
+          (e) => e.id === focusEvent || (time >= e.startMs && time < e.endMs),
+        );
+    this.paintEvents(events, scene);
     for (const clip of scene.audio) {
       const audio = this.audio.get(clip.id);
       if (!audio) continue;
@@ -628,7 +642,7 @@ export class PlayerView {
       this.buffering = false;
       this.message.hidden = true;
       this.paintScene(scene, time);
-      if (!this.editing) this.paintEvent(this.runtime?.active?.event);
+      if (!this.editing) this.paintEvents();
       if (!this.editing && this.runtime?.playing) await this.syncMedia();
     } catch (error) {
       if (token === this.token) {
@@ -689,9 +703,15 @@ export class PlayerView {
       this.syncMedia();
     }
     if (event.type === "event") {
-      this.pointer = null;
       this.root.classList.remove("settings-visible");
+      if (runtime.interactions.size === 1) this.startSound(event.event);
+    }
+    if (event.type === "operation") {
       this.startSound(runtime.active.event);
+    }
+    if (event.type === "conflict") {
+      this.showError(event.message);
+      return;
     }
     if (event.type === "result") {
       this.interactionUntil = performance.now() + 500;
@@ -710,7 +730,7 @@ export class PlayerView {
     if (event.type === "stop") this.cleanupMedia();
     if (runtime.scene && runtime.state === "playing") {
       this.paintScene(runtime.scene, runtime.timeMs);
-      this.paintEvent(runtime.active?.event);
+      this.paintEvents();
       this.paintHud();
       this.syncMedia();
     }
@@ -1030,59 +1050,99 @@ export class PlayerView {
       } else el.pause();
     }
   }
-  paintEvent(event) {
+  eventElement(id) {
+    return [...this.hud.children].find((el) => el.dataset.interactionId === id);
+  }
+  paintEvents(
+    events = [...(this.runtime?.interactions.values() || [])].map(
+      (x) => x.event,
+    ),
+    scene = this.runtime?.scene,
+  ) {
+    const ids = new Set(events.map((e) => e.id));
+    for (const el of [...this.hud.children]) {
+      if (!ids.has(el.dataset.interactionId)) el.remove();
+    }
+    const rows = scene
+      ? trackRows(scene).filter((r) => r.kind === "event")
+      : [];
+    for (const event of events) {
+      let host = this.eventElement(event.id);
+      if (!host) {
+        host = document.createElement("div");
+        host.className = "interaction-item";
+        host.dataset.interactionId = event.id;
+        this.hud.append(host);
+      }
+      const index = rows.findIndex((r) =>
+        r.items.some((x) => x.id === event.id),
+      );
+      host.style.zIndex = String(rows.length - index);
+      host.inert =
+        !this.editing &&
+        !!this.runtime?.operating &&
+        this.runtime.operating.event.id !== event.id;
+      this.paintEvent(event, host);
+    }
+  }
+  paintEvent(event, host) {
     const key = event
       ? JSON.stringify([event, this.editing ? null : this.runtime?.variables])
       : "";
-    if (this.hud.dataset.key === key) return;
-    this.hud.dataset.key = key;
-    this.hud.innerHTML = "";
+    if (host.dataset.key === key) return;
+    host.dataset.key = key;
+    host.innerHTML = "";
     this.eventId = event?.id;
     if (!event) return;
-    this.hud.dataset.entryMotion = ["fade", "none"].includes(event.entryMotion)
+    host.dataset.entryMotion = ["fade", "none"].includes(event.entryMotion)
       ? event.entryMotion
       : "classic";
     const edit = this.editing ? `data-edit-event="${esc(event.id)}"` : "";
     if (event.kind === "choice") {
-      const opts = this.editing ? event.options : this.runtime.visibleOptions();
-      this.hud.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
+      const opts = this.editing
+        ? event.options
+        : this.runtime.visibleOptions(event.id);
+      host.innerHTML = `<div class="choices">${opts.map((o, i) => `<button ${edit} data-option-id="${esc(o.id)}" style="translate:${o.x}cqw ${o.y}cqw"><span>${esc(o.text)}</span></button>`).join("")}</div>`;
       if (!opts.length && !this.editing)
         this.showError("当前条件下没有可用选项，请联系作品作者");
     } else if (event.kind === "hotspot")
-      this.hud.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
+      host.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
     else {
       const glyph = GESTURE_PATHS[event.gesture] || GESTURE_PATHS.click;
-      this.hud.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;
+      host.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;
     }
   }
   paintHud() {
-    const active = this.runtime?.active;
-    if (!active) return;
-    const e = active.event;
-    const remaining = active.operating
-      ? Math.max(0, (e.timeoutMs || 4000) - active.elapsedMs)
-      : Math.max(0, e.endMs - this.runtime.timeMs);
-    const el = this.hud.querySelector(".qte");
-    if (el) {
-      el.style.setProperty("--progress", String((active.progress || 0) * 100));
-      el.style.setProperty(
-        "--qte-progress",
-        String((active.progress || 0) * 100),
-      );
-      el.querySelectorAll(".qte-segments i").forEach((segment, i) =>
-        segment.classList.toggle("filled", i < (active.clicks || 0)),
-      );
-      el.querySelector(".qte-count").classList.toggle(
-        "sr-only",
-        remaining === null,
-      );
-      el.querySelector(".qte-count").textContent =
-        e.gesture === "multi"
-          ? `${active.clicks || 0} / ${e.clicks}${remaining === null ? "" : " · " + (remaining / 1000).toFixed(1) + " 秒"}`
-          : remaining === null
-            ? ""
-            : `${(remaining / 1000).toFixed(1)} 秒`;
-      el.classList.toggle("urgent", remaining !== null && remaining < 1000);
+    for (const active of this.runtime?.interactions.values() || []) {
+      const e = active.event;
+      const remaining = active.operating
+        ? Math.max(0, (e.timeoutMs || 4000) - active.elapsedMs)
+        : Math.max(0, e.endMs - this.runtime.timeMs);
+      const el = this.eventElement(e.id)?.querySelector(".qte");
+      if (el) {
+        el.style.setProperty(
+          "--progress",
+          String((active.progress || 0) * 100),
+        );
+        el.style.setProperty(
+          "--qte-progress",
+          String((active.progress || 0) * 100),
+        );
+        el.querySelectorAll(".qte-segments i").forEach((segment, i) =>
+          segment.classList.toggle("filled", i < (active.clicks || 0)),
+        );
+        el.querySelector(".qte-count").classList.toggle(
+          "sr-only",
+          remaining === null,
+        );
+        el.querySelector(".qte-count").textContent =
+          e.gesture === "multi"
+            ? `${active.clicks || 0} / ${e.clicks}${remaining === null ? "" : " · " + (remaining / 1000).toFixed(1) + " 秒"}`
+            : remaining === null
+              ? ""
+              : `${(remaining / 1000).toFixed(1)} 秒`;
+        el.classList.toggle("urgent", remaining !== null && remaining < 1000);
+      }
     }
   }
   loop(now) {

@@ -149,11 +149,15 @@ test("one choice with many options is one operation; independent overlaps identi
   assert.equal(interactionConflicts(scene).length, 0);
   const qte = newEvent(2000, "qte", 1000);
   scene.events.push(qte);
+  assert.equal(interactionConflicts(scene).length, 0);
+  const other = newEvent(2200, "qte", 500);
+  scene.events.push(other);
   const conflict = interactionConflicts(scene)[0];
-  assert.deepEqual([conflict.start, conflict.end], [2000, 3000]);
+  assert.equal(conflict.kind, "occlusion");
+  assert.deepEqual([conflict.start, conflict.end], [2200, 2700]);
   assert.deepEqual(
     new Set([conflict.a.id, conflict.b.id]),
-    new Set([choice.id, qte.id]),
+    new Set([qte.id, other.id]),
   );
 });
 test("main insertion preserves overlay layers and pushes later material, video overlay source bounds are checked", () => {

@@ -1237,11 +1237,11 @@ button:disabled {
   }
 }
 
-.interaction[data-entry-motion="fade"] > * {
+.interaction-item[data-entry-motion="fade"] > * {
   animation: interaction-fade 0.25s ease-out;
 }
-.interaction[data-entry-motion="none"] > *,
-.interaction[data-entry-motion="none"] .psd-qte-surface {
+.interaction-item[data-entry-motion="none"] > *,
+.interaction-item[data-entry-motion="none"] .psd-qte-surface {
   animation: none;
 }
 @keyframes interaction-fade {
@@ -1253,7 +1253,7 @@ button:disabled {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .interaction[data-entry-motion="fade"] > * {
+  .interaction-item[data-entry-motion="fade"] > * {
     animation: none;
   }
 }
@@ -1327,4 +1327,16 @@ button:disabled {
 .play-stage .qte {
   pointer-events: auto;
   touch-action: none;
+}
+
+.interaction-item {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.interaction-item[inert] {
+  pointer-events: none;
+}
+.interaction-item[inert] * {
+  pointer-events: none !important;
 }
