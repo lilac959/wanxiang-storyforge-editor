@@ -41,6 +41,13 @@ class Files {
     await fs.promises.writeFile(tmp, b);
     await fs.promises.rename(tmp, dest);
   }
+  async delete(key) {
+    try {
+      await fs.promises.unlink(this.file(key));
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  }
 }
 (async () => {
   const { publishing } = await import("../outputs/cloudflare/publishing.mjs");

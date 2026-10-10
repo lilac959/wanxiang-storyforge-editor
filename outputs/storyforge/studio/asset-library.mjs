@@ -1,5 +1,15 @@
 import { esc } from "./storage.mjs";
 import { UI_COMPONENTS, componentThumbnail } from "./ui-components.mjs";
+import { references } from "./model.mjs";
+
+export function deletionPlan(project, ids) {
+  const used = new Set(references(project));
+  const selected = [...new Set(ids)].filter((id) => project.assets[id]);
+  return {
+    unused: selected.filter((id) => !used.has(id)),
+    used: selected.filter((id) => used.has(id)),
+  };
+}
 
 const labels = {
   all: "全部",
@@ -40,6 +50,9 @@ export class AssetLibrary {
     this.category = "all";
     this.search = "";
     this.sort = "recent";
+    this.managing = false;
+    this.selected = new Set();
+    this.unusedOnly = false;
   }
   dispose() {
     this.signature = null;
@@ -52,7 +65,22 @@ export class AssetLibrary {
     });
   }
   mount(host, project) {
-    const signature = JSON.stringify([project.id, project.assets]);
+    const signature = JSON.stringify([
+      project.id,
+      project.assets,
+      references(project),
+      document.body.dataset.view,
+    ]);
+    if (
+      this.project?.id !== project.id ||
+      !host.classList.contains("settings-page")
+    ) {
+      this.managing = false;
+      this.selected.clear();
+    }
+    this.selected = new Set(
+      [...this.selected].filter((id) => project.assets[id]),
+    );
     this.project = project;
     if (
       this.host === host &&
@@ -98,6 +126,25 @@ export class AssetLibrary {
       this.grid();
     };
     this.grid();
+    if (host.classList.contains("settings-page")) {
+      const controls = host.querySelector(".asset-controls");
+      const filter = document.createElement("label");
+      filter.className = "unused-filter";
+      filter.innerHTML = `<input type="checkbox" ${this.unusedOnly ? "checked" : ""}>未使用`;
+      filter.querySelector("input").onchange = (e) => {
+        this.unusedOnly = e.target.checked;
+        this.grid();
+      };
+      const manage = document.createElement("button");
+      manage.textContent = "批量管理";
+      manage.onclick = () => {
+        this.managing = !this.managing;
+        this.selected.clear();
+        this.anchor = null;
+        this.grid();
+      };
+      controls.append(filter, manage);
+    }
   }
   grid() {
     this.observer?.disconnect();
@@ -137,6 +184,27 @@ export class AssetLibrary {
     );
     if (this.sort === "name")
       list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+    const used = new Set(references(this.project));
+    if (this.unusedOnly)
+      list = list.filter((a) => a.kind !== "ui" && !used.has(a.id));
+    if (this.managing) list = list.filter((a) => a.kind !== "ui");
+    this.visibleIds = list.map((a) => a.id);
+    this.host.querySelector(".asset-batchbar")?.remove();
+    if (this.managing) {
+      const bar = document.createElement("div");
+      bar.className = "asset-batchbar";
+      bar.innerHTML = `<span>已选 ${this.selected.size} 项</span><button data-batch="all">全选当前结果</button><button data-action="batch-remove-assets" ${this.selected.size ? "" : "disabled"}>删除所选</button><button data-batch="done">完成</button>`;
+      grid.before(bar);
+      bar.querySelector('[data-batch="all"]').onclick = () => {
+        this.selected = new Set(this.visibleIds);
+        this.grid();
+      };
+      bar.querySelector('[data-batch="done"]').onclick = () => {
+        this.managing = false;
+        this.selected.clear();
+        this.grid();
+      };
+    }
     grid.innerHTML =
       list
         .map(
@@ -144,7 +212,46 @@ export class AssetLibrary {
             `<article class="media-card"><button class="media-open" data-media-id="${esc(a.id)}" data-media-kind="${a.kind}" aria-label="预览 ${esc(a.name)}"><div class="media-thumb ${a.kind}">${a.kind === "ui" ? componentThumbnail(a) : a.kind === "audio" ? '<span class="audio-symbol">♫</span>' : "<span>加载缩略图…</span>"}</div><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${labels[a.kind]}${a.durationMs ? ` · ${(a.durationMs / 1000).toFixed(1)} 秒` : ""}${a.kind === "ui" ? " · 第 1 版" : ""}</small></button><button class="media-add" data-action="add-library-item" data-id="${esc(a.id)}" data-kind="${a.kind}" aria-label="添加 ${esc(a.name)}到时间轴" title="添加到播放指针位置">＋</button><details class="media-menu"><summary aria-label="${esc(a.name)}操作">···</summary><div>${a.kind === "ui" ? `<button data-action="preview-ui" data-id="${esc(a.id)}">预览并试用</button><button data-action="use-ui" data-id="${esc(a.id)}">添加到当前节点</button>` : `<button data-action="rename-asset" data-id="${esc(a.id)}">重命名</button><button data-action="asset-uses" data-id="${esc(a.id)}">查看使用位置</button><button data-action="replace-asset" data-id="${esc(a.id)}">替换素材</button><button data-action="remove-asset" data-id="${esc(a.id)}">删除</button>`}</div></details></article>`,
         )
         .join("") || '<p class="media-empty">没有找到素材</p>';
+    if (this.managing) {
+      grid.querySelectorAll(".media-card").forEach((card) => {
+        const open = card.querySelector(".media-open"),
+          id = open.dataset.mediaId;
+        card.classList.toggle("batch-selected", this.selected.has(id));
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = this.selected.has(id);
+        check.setAttribute(
+          "aria-label",
+          "选择 " + this.project.assets[id].name,
+        );
+        check.className = "asset-select";
+        card.prepend(check);
+        card.querySelector(".media-menu")?.remove();
+        card.querySelector(".media-add")?.remove();
+        card.onclick = (e) => {
+          const index = this.visibleIds.indexOf(id),
+            previous = this.visibleIds.indexOf(this.anchor);
+          const select =
+            e.target === check ? check.checked : !this.selected.has(id);
+          const ids =
+            e.shiftKey && previous >= 0
+              ? this.visibleIds.slice(
+                  Math.min(index, previous),
+                  Math.max(index, previous) + 1,
+                )
+              : [id];
+          for (const key of ids)
+            select ? this.selected.add(key) : this.selected.delete(key);
+          this.anchor = id;
+          this.grid();
+        };
+      });
+    }
     grid.querySelectorAll(".media-open").forEach((b) => {
+      if (this.managing) {
+        b.draggable = false;
+        return;
+      }
       b.draggable = true;
       let dragged = false;
       b.onclick = () => {

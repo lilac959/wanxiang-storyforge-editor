@@ -573,7 +573,7 @@ export function validate(p, { publish = false } = {}) {
     return issues;
   }
   for (const pos of Object.values(p.editor.positions))
-    if (!pos || !finite(pos.x, 0, 100000) || !finite(pos.y, 0, 100000)) {
+    if (!pos || !finite(pos.x, -100000, 100000) || !finite(pos.y, -100000, 100000)) {
       error("剧情地图位置无效", null, "structure");
       return issues;
     }

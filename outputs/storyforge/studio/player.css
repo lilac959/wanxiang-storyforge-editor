@@ -1168,7 +1168,7 @@ button:disabled {
   width: min(320px, calc(100% - 40px));
   max-height: 100%;
   overflow-y: auto;
-  padding: max(72px, env(safe-area-inset-top)) 26px 26px;
+  padding: max(24px, env(safe-area-inset-top)) 26px 24px;
   background: #101c1ef5;
   border: 0;
   border-right: 1px solid #d9b56e66;

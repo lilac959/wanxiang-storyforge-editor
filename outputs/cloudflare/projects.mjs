@@ -82,6 +82,37 @@ export class Projects {
       if (raw.length > 4 * 1024 * 1024)
         return reply({ error: "项目数据超过 4 MB" }, 413);
       const body = JSON.parse(raw);
+      if (path === "/purge") {
+        if (
+          !Array.isArray(body.ids) ||
+          !body.ids.length ||
+          body.ids.length > 5000 ||
+          !body.ids.every(safeId)
+        )
+          return reply({ error: "作品编号无效" }, 400);
+        const ids = [...new Set(body.ids)];
+        const index = (await this.json("projects")) || [];
+        // Validate the whole batch before making any deletion.
+        for (const id of ids) {
+          const item = index.find((x) => x.id === id);
+          if (item && !item.deleted)
+            return reply({ error: "只能清理回收站中的作品" }, 409);
+          if (!item && !(await this.json(`purged/${id}`)))
+            return reply({ error: "作品不存在" }, 404);
+        }
+        for (const id of ids) {
+          await this.storage.put(
+            `purged/${id}`,
+            JSON.stringify({ deletedAt: new Date().toISOString() }),
+          );
+          await this.storage.delete(`draft/${id}`);
+        }
+        await this.storage.put(
+          "projects",
+          JSON.stringify(index.filter((x) => !ids.includes(x.id))),
+        );
+        return reply({ ok: true, count: ids.length });
+      }
       if (path === "/archive") {
         if (!safeId(body.id) || typeof body.deleted !== "boolean")
           return reply({ error: "请求无效" }, 400);
@@ -114,6 +145,15 @@ export class Projects {
       if (!["/draft", "/publish"].includes(path))
         return reply({ error: "接口不存在" }, 404);
       const project = body.project;
+      if (path === "/draft" && (await this.json(`purged/${project?.id}`)))
+        return reply({ error: "作品已永久删除，请新建作品或导入备份" }, 409);
+      if (
+        path === "/draft" &&
+        ((await this.json("projects")) || []).some(
+          (x) => x.id === project?.id && x.deleted,
+        )
+      )
+        return reply({ error: "作品已移入回收站，请先恢复作品" }, 409);
       if (projectId && project?.id !== projectId)
         return reply({ error: "作品编号不匹配" }, 400);
       let issues;

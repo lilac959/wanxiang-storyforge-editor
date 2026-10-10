@@ -2613,3 +2613,132 @@ body[data-view="scene"] .layout > .inspector-resize {
   pointer-events: auto;
   cursor: move;
 }
+
+/* Independent panel scrolling with visible, resizable boundaries. */
+.graph-scroll {
+  overflow: hidden;
+  touch-action: none;
+}
+.graph-space {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.graph-space .graph-board {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+.graph-lines {
+  overflow: visible;
+}
+body[data-view="scene"] .library {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 12px 12px;
+}
+body[data-view="scene"] .library .asset-toolbar {
+  flex: 0 0 auto;
+  padding-top: 12px;
+  padding-bottom: 10px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+body[data-view="scene"] .library .media-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+  padding-top: 12px;
+  overscroll-behavior: contain;
+}
+body[data-view="scene"] .inspector {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.inspector-header {
+  flex: 0 0 auto;
+  padding: 12px 16px 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.inspector-header h2 {
+  margin: 0 0 12px;
+}
+.inspector-header .property-tabs {
+  margin-bottom: 0;
+  border: 0;
+}
+.inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  overscroll-behavior: contain;
+}
+body[data-view="scene"] .panel-resize {
+  background: #edeef5;
+  border: 1px solid #dfe1eb;
+}
+body[data-view="scene"] .panel-resize:hover {
+  background: #bcb0f8;
+}
+body[data-view="scene"] .timeline-resize {
+  height: 6px;
+  top: -3px;
+}
+body[data-page="assets"] .asset-toolbar {
+  position: sticky;
+  top: -20px;
+  z-index: 4;
+  background: #f6f7fb;
+  padding: 12px 0;
+}
+.asset-batchbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+.unused-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.asset-select {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  accent-color: #7964ed;
+}
+.media-card.batch-selected {
+  border-color: #7964ed;
+  box-shadow: 0 0 0 1px #7964ed;
+}
+body[data-page="assets"] .asset-batchbar {
+  position: sticky;
+  top: 122px;
+  z-index: 3;
+  background: #f6f7fb;
+}
+.project-recovery {
+  margin-top: 16px;
+}
+body[data-view="scene"] .timeline-head {
+  flex: 0 0 auto;
+}
+#preview[data-device="portrait"] {
+  width: min(390px, 100vw, calc(100dvh * 390 / 844));
+  height: min(844px, 100dvh);
+}
+#preview[data-device="landscape"] {
+  width: min(844px, 100vw);
+  height: min(390px, 100dvh, calc(100vw * 390 / 844));
+}

@@ -43,7 +43,7 @@ export class PlayerView {
     this.last = performance.now();
     this.eventId = null;
     root.innerHTML =
-      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden><section class="play-controls" role="dialog" aria-modal="true" aria-label="播放设置"><header>设置<button data-player="close-settings" aria-label="关闭设置">×</button></header><div class="settings-options"><button data-player="pause">继续</button><button data-player="sound">声音开</button><button data-player="restart">重新开始</button><button data-player="exit">返回开屏</button><button data-player="fullscreen">全屏</button></div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" hidden></span></section></div>';
+      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden></div>';
     this.stage = root.querySelector(".play-stage");
     this.menuMarkup(canExit);
     this.stageObserver = new ResizeObserver(() => this.fitStage());
@@ -95,26 +95,20 @@ export class PlayerView {
     this.settingsButton.addEventListener("focus", () =>
       this.showSettingsButton(),
     );
-    if (!root.requestFullscreen)
-      root.querySelector('[data-player="fullscreen"]').hidden = true;
     this.showSettingsButton();
     this.clickHandler = (e) => {
       const command = e.target.closest("[data-player]")?.dataset.player;
       if (command) {
         if (command === "settings") this.openSettings();
         if (command === "close-settings" || command === "pause")
-          this.closeSettings(command === "pause");
-        if (["restart", "home", "exit"].includes(command)) {
+          this.closeSettings();
+        if (command === "restart") {
           if (!this.menuOpen) this.openSettings();
           this.confirmAction = command;
           this.menu.querySelector(".settings-options").hidden = true;
           this.menu.querySelector(".settings-confirm").hidden = false;
           this.menu.querySelector(".settings-confirm p").textContent =
-            command === "restart"
-              ? "重新开始会清除本次进度，确定重新开始？"
-              : command === "home"
-                ? "结束本次游玩，返回开始页？"
-                : "退出试玩，返回编辑器？";
+            "重新开始会清除本次进度，确定重新开始？";
           this.menu.querySelector('[data-player="cancel-action"]').focus();
         }
         if (command === "cancel-action") {
@@ -125,17 +119,6 @@ export class PlayerView {
           const action = this.confirmAction;
           this.closeSettings(false, false);
           if (action === "restart") this.start(this.project);
-          else if (action === "home") {
-            if (this.onHome) this.onHome();
-            else
-              this.start(
-                this.project,
-                openingCard(this.project, "splash")?.id || this.project.entryId,
-              );
-          } else if (action === "exit") {
-            this.stop();
-            this.onExit();
-          }
         }
         if (command === "sound") {
           this.muted = !this.muted;
@@ -147,22 +130,6 @@ export class PlayerView {
             ? "关闭"
             : "开启";
           if (this.muted) qteAudio.stop();
-        }
-        if (command === "fullscreen") {
-          const task = document.fullscreenElement
-            ? document.exitFullscreen()
-            : this.root.requestFullscreen();
-          task
-            ?.then(() => {
-              this.root.querySelector(
-                '[data-player="fullscreen"] span',
-              ).textContent = document.fullscreenElement
-                ? "退出全屏"
-                : "进入全屏";
-            })
-            .catch(() => {
-              this.status("当前设备无法进入全屏");
-            });
         }
         return;
       }
@@ -293,9 +260,9 @@ export class PlayerView {
     this.root.querySelector(".settings-toggle").innerHTML = icons.menu;
     this.root
       .querySelector(".settings-toggle")
-      .setAttribute("aria-label", "播放菜单");
+      .setAttribute("aria-label", "暂停与设置");
     this.root.querySelector(".settings-shade").innerHTML =
-      `<section class="play-controls" role="dialog" aria-modal="true" aria-label="播放菜单"><header><span>播放菜单</span><button data-player="close-settings" aria-label="关闭播放菜单">${icons.close}</button></header><div class="settings-options">${button("pause", "继续游玩")}${button("sound", "声音")}${button("restart", "从头开始")}${button("home", "返回开始页")}${button("fullscreen", "进入全屏")}${canExit ? button("exit", "退出试玩") : ""}</div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" role="status"></span></section>`;
+      `<section class="play-controls" role="dialog" aria-modal="true" aria-label="暂停与设置"><header><span>暂停与设置</span><button data-player="close-settings" aria-label="关闭暂停与设置">${icons.close}</button></header><div class="settings-options">${button("pause", "继续游玩")}${button("sound", "声音")}${button("restart", "重新开始")}</div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" role="status"></span></section>`;
   }
   fitStage() {
     const media = this.visual?.querySelector("video,img");

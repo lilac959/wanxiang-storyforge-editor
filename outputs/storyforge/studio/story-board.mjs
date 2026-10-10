@@ -1,3 +1,4 @@
+import { worldPoint, zoomCamera, nodeBounds } from "./graph-camera.mjs";
 import { esc } from "./storage.mjs";
 import { duration, reachable } from "./model.mjs";
 import { visualClips } from "./timeline.mjs";
@@ -26,7 +27,8 @@ export class StoryBoard {
     this.api = api;
     this.scale = 1;
     this.selected = new Set();
-    this.mode = "select";
+    this.mode = "pan";
+    this.camera = { x: 0, y: 0 };
     this.pending = null;
     this.cards = new Map();
     this.edges = new Map();
@@ -68,9 +70,12 @@ export class StoryBoard {
     host.addEventListener(
       "wheel",
       (e) => {
-        if (e.ctrlKey || e.metaKey) {
-          e.preventDefault();
-          this.zoom(Math.exp(-e.deltaY * 0.002), e);
+        e.preventDefault();
+        if (e.ctrlKey || e.metaKey) this.zoom(Math.exp(-e.deltaY * 0.002), e);
+        else {
+          this.camera.x -= e.deltaX || (e.shiftKey ? e.deltaY : 0);
+          this.camera.y -= e.shiftKey ? 0 : e.deltaY;
+          this.applyScale();
         }
       },
       { passive: false },
@@ -117,8 +122,11 @@ export class StoryBoard {
   point(e) {
     const r = this.host.getBoundingClientRect();
     return {
-      x: Math.max(20, (e.clientX - r.left + this.host.scrollLeft) / this.scale),
-      y: Math.max(20, (e.clientY - r.top + this.host.scrollTop) / this.scale),
+      ...worldPoint(
+        { ...this.camera, scale: this.scale },
+        e.clientX - r.left,
+        e.clientY - r.top,
+      ),
     };
   }
   ports(n) {
@@ -129,7 +137,7 @@ export class StoryBoard {
       this.selected = new Set([selected]);
       this.activeEdge = null;
       this.scale = 1;
-      this.host.scrollTo(0, 0);
+      this.camera = { x: 0, y: 0 };
     }
     this.project = project;
     this.nodes = flowNodes(project);
@@ -278,9 +286,11 @@ export class StoryBoard {
   applyScale() {
     this.surface.style.width = this.size.width + "px";
     this.surface.style.height = this.size.height + "px";
-    this.surface.style.transform = `scale(${this.scale})`;
-    this.space.style.width = this.size.width * this.scale + "px";
-    this.space.style.height = this.size.height * this.scale + "px";
+    this.surface.style.transform = `translate(${this.camera.x}px, ${this.camera.y}px) scale(${this.scale})`;
+    this.host.style.backgroundPosition = `${this.camera.x}px ${this.camera.y}px`;
+    this.host.style.backgroundSize = `${18 * this.scale}px ${18 * this.scale}px`;
+    this.space.style.width = "100%";
+    this.space.style.height = "100%";
     this.surface.classList.toggle("overview", this.scale < 0.48);
     this.api.zoom(this.scale);
   }
@@ -404,7 +414,10 @@ export class StoryBoard {
   drawMini() {
     const mini = this.api.mini();
     if (!mini) return;
-    mini.innerHTML = `<svg viewBox="0 0 ${this.size.width} ${this.size.height}">${this.nodes
+    const b = nodeBounds(this.nodes, this.positions, W, (id) =>
+      this.height(id),
+    );
+    mini.innerHTML = `<svg viewBox="${b.left - 30} ${b.top - 30} ${b.width + 60} ${b.height + 60}">${this.nodes
       .map((n) => {
         const p = this.positions[n.id];
         return `<rect data-mini="${esc(n.id)}" x="${p.x}" y="${p.y}" width="240" height="150" rx="8" fill="${this.selected.has(n.id) ? "#7764dc" : "#bfc3d3"}"/>`;
@@ -415,48 +428,53 @@ export class StoryBoard {
     };
   }
   zoom(factor, event) {
-    const r = this.host.getBoundingClientRect(),
-      x = event ? event.clientX - r.left : this.host.clientWidth / 2,
-      y = event ? event.clientY - r.top : this.host.clientHeight / 2,
-      wx = (this.host.scrollLeft + x) / this.scale,
-      wy = (this.host.scrollTop + y) / this.scale;
-    const oldOverview = this.scale < 0.48;
-    this.scale = Math.max(0.15, Math.min(2, this.scale * factor));
+    const r = this.host.getBoundingClientRect();
+    const next = zoomCamera(
+      { ...this.camera, scale: this.scale },
+      factor,
+      event ? event.clientX - r.left : this.host.clientWidth / 2,
+      event ? event.clientY - r.top : this.host.clientHeight / 2,
+    );
+    const overview = this.scale < 0.48;
+    this.scale = next.scale;
+    this.camera = { x: next.x, y: next.y };
     this.applyScale();
-    this.host.scrollLeft = wx * this.scale - x;
-    this.host.scrollTop = wy * this.scale - y;
-    if (oldOverview !== this.scale < 0.48) {
+    if (overview !== this.scale < 0.48) {
       this.measure();
       this.lines();
     }
   }
   fit() {
+    const b = nodeBounds(this.nodes, this.positions, W, (id) =>
+      this.height(id),
+    );
     this.scale = Math.max(
       0.15,
       Math.min(
         1,
-        (this.host.clientWidth - 60) / this.size.width,
-        (this.host.clientHeight - 60) / this.size.height,
+        (this.host.clientWidth - 60) / b.width,
+        (this.host.clientHeight - 60) / b.height,
       ),
     );
+    this.camera = {
+      x:
+        (this.host.clientWidth - b.width * this.scale) / 2 -
+        b.left * this.scale,
+      y:
+        (this.host.clientHeight - b.height * this.scale) / 2 -
+        b.top * this.scale,
+    };
     this.applyScale();
-    this.host.scrollTo(0, 0);
     this.lines();
   }
   locate(id) {
     const p = this.positions[id];
     if (!p) return;
-    this.host.scrollTo({
-      left: Math.max(
-        0,
-        p.x * this.scale - this.host.clientWidth / 2 + (W * this.scale) / 2,
-      ),
-      top: Math.max(
-        0,
-        p.y * this.scale - this.host.clientHeight / 2 + 80 * this.scale,
-      ),
-      behavior: "smooth",
-    });
+    this.camera = {
+      x: this.host.clientWidth / 2 - (p.x + W / 2) * this.scale,
+      y: this.host.clientHeight / 2 - (p.y + this.height(id) / 2) * this.scale,
+    };
+    this.applyScale();
   }
   click(e) {
     if (this.moved) {
@@ -580,16 +598,18 @@ export class StoryBoard {
     });
   }
   pointer(e) {
-    const port = e.target.closest("[data-port],[data-reconnect]");
+    const panOverride = this.spaceHeld || e.button === 1;
+    const port =
+      !panOverride && e.target.closest("[data-port],[data-reconnect]");
     if (port && e.button === 0) return this.portDrag(e, port);
     if (
       (e.button !== 0 && e.button !== 1) ||
-      e.target.closest("button,[data-line-from]")
+      (!panOverride && e.target.closest("button,[data-line-from]"))
     )
       return;
     const card = e.target.closest("[data-graph-scene]"),
       start = { x: e.clientX, y: e.clientY },
-      scroll = { x: this.host.scrollLeft, y: this.host.scrollTop },
+      scroll = { ...this.camera },
       mode =
         this.spaceHeld || e.button === 1
           ? "pan"
@@ -637,13 +657,14 @@ export class StoryBoard {
         dx = ev.clientX - start.x;
         dy = ev.clientY - start.y;
         if (mode === "pan") {
-          this.host.scrollLeft = scroll.x - dx;
-          this.host.scrollTop = scroll.y - dy;
+          this.camera = { x: scroll.x + dx, y: scroll.y + dy };
+          this.applyScale();
+          this.moved = Math.hypot(dx, dy) > 4;
           return;
         }
         if (mode === "select") {
           const r = this.host.getBoundingClientRect();
-          box.style.cssText = `left:${Math.min(start.x, ev.clientX) - r.left + scroll.x}px;top:${Math.min(start.y, ev.clientY) - r.top + scroll.y}px;width:${Math.abs(dx)}px;height:${Math.abs(dy)}px`;
+          box.style.cssText = `left:${Math.min(start.x, ev.clientX) - r.left}px;top:${Math.min(start.y, ev.clientY) - r.top}px;width:${Math.abs(dx)}px;height:${Math.abs(dy)}px`;
           return;
         }
         let mx = dx / this.scale,
@@ -669,14 +690,6 @@ export class StoryBoard {
             this.guides.innerHTML += `<i style="top:${lead.y + my}px;left:0;width:${this.size.width}px;height:1px"></i>`;
           }
         }
-        mx = Math.max(
-          mx,
-          20 - Math.min(...Object.values(base).map((p) => p.x)),
-        );
-        my = Math.max(
-          my,
-          20 - Math.min(...Object.values(base).map((p) => p.y)),
-        );
         for (const [id, p] of Object.entries(base)) {
           this.positions[id] = {
             x: Math.round(p.x + mx),

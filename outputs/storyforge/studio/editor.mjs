@@ -20,7 +20,7 @@ function previewTracks() {
   return trackPreview.get(key);
 }
 import { projectCatalog } from "./project-catalog.mjs";
-import { AssetLibrary, mediaUses } from "./asset-library.mjs";
+import { AssetLibrary, mediaUses, deletionPlan } from "./asset-library.mjs";
 import {
   UI_COMPONENTS,
   componentEvent,
@@ -89,7 +89,6 @@ import { History } from "./history.mjs";
 import { repairTechnicalData, describeIssues } from "./check-project.mjs";
 import { PlayerView } from "./player-view.mjs";
 import { Session } from "./session.mjs";
-import { demoProject } from "./demo.mjs";
 
 const $ = (s) => document.querySelector(s),
   assets = new AssetStore();
@@ -135,8 +134,12 @@ const sidebarLibrary = new AssetLibrary(
 );
 let publishAfterConnect = false;
 let projectRows = [];
+let idleWorkspace = false;
+let pendingAssetDeletion = [],
+  pendingProjectPurge = [];
 let projectRequest = 0,
   workspaceReturn = null;
+let projectCloudReady = false;
 let timelineClipboard = null;
 const timelineSelection = new Set();
 const propertyTabs = new Map();
@@ -195,6 +198,7 @@ function mutate(label, fn) {
   }
 }
 function changed() {
+  if (idleWorkspace) return;
   dirty = true;
   try {
     storage.saveLocal(p());
@@ -207,6 +211,7 @@ function changed() {
   if (storage.token && !busy) saveTimer = setTimeout(sync, 1200);
 }
 async function sync() {
+  if (idleWorkspace) return;
   clearTimeout(saveTimer);
   const errors = validate(p()).filter((x) => x.level === "error");
   if (errors.length) {
@@ -339,7 +344,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="add-marker">添加标记</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button><details class="more-menu"><summary title="预览尺寸">预览设备</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><span class="time-label"></span><input id="seek" type="range" min="0" step="10" aria-label="画面进度"><span class="duration-label"></span></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-speed">慢放区间</button><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
   setupEditingLayout();
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
@@ -405,6 +410,19 @@ function shell() {
 }
 function render() {
   stopTimelinePlayback();
+  if (idleWorkspace) page = "projects";
+  document.body.dataset.page = page;
+  document
+    .querySelectorAll(".topbar button[data-action], .rail button[data-page]")
+    .forEach((b) => {
+      b.disabled =
+        idleWorkspace &&
+        !["import", "help", "projects"].includes(b.dataset.action);
+    });
+  if (idleWorkspace) {
+    $(".project-name").textContent = "";
+    status("请选择或新建作品");
+  }
   $(".projects-page").hidden = page !== "projects";
   if (page === "projects") {
     document.body.dataset.view = "projects";
@@ -420,13 +438,6 @@ function render() {
     return;
   }
   $(".rail .bottom").classList.remove("active");
-  for (const action of ["undo", "redo"]) {
-    const button =
-      $(".graph-bottomtools [data-action=" + action + "]") ||
-      $(".topbar [data-action=" + action + "]");
-    if (button && !$(".workspace-head [data-action=" + action + "]"))
-      $(".workspace-head").append(button.cloneNode(true));
-  }
   const menu = $(".general-menu");
   const menuHost = $(".topbar");
   if (menu.parentElement !== menuHost) {
@@ -709,9 +720,11 @@ function updatePlayhead() {
 }
 function renderInspector() {
   const panel = $(".inspector"),
-    scroll = panel.scrollTop;
+    scroll =
+      panel.querySelector(".inspector-body")?.scrollTop || panel.scrollTop;
   renderInspectorContent();
   organizeProperties(panel);
+  fixInspectorHeader();
   if (page === "story" && graph) {
     const close = document.createElement("button");
     close.className = "inspector-close";
@@ -720,7 +733,7 @@ function renderInspector() {
     close.textContent = "×";
     panel.prepend(close);
   }
-  panel.scrollTop = scroll;
+  (panel.querySelector(".inspector-body") || panel).scrollTop = scroll;
 }
 function renderInspectorContent() {
   if (page === "story" && graph && board?.activeEdge) {
@@ -1257,6 +1270,7 @@ function closePanel() {
   if (board) board.pending = null;
 }
 async function saveCurrent() {
+  if (idleWorkspace) return;
   try {
     storage.saveLocal(p());
   } catch (error) {
@@ -1270,7 +1284,7 @@ async function saveCurrent() {
   }
 }
 async function adopt(project, revision = "none", backup = true) {
-  if (history && backup) {
+  if (history && backup && !idleWorkspace) {
     if (project.id === p().id && revision !== storage.queue.revision)
       storage.saveLocal(p());
     else await saveCurrent();
@@ -1279,9 +1293,10 @@ async function adopt(project, revision = "none", backup = true) {
   storage.queue.pending = null;
   storage.queue.stopped = true;
   if (storage.queue.running) await storage.queue.running;
-  if (history && backup) storage.backup(p(), "切换作品前");
+  if (history && backup && !idleWorkspace) storage.backup(p(), "切换作品前");
   project = unifyCards(project);
   await resolveOpeningMedia(project, assets).catch((e) => notify(e.message));
+  idleWorkspace = false;
   history = new History(project, changed);
   selected = project.entryId;
   selection = { kind: "scene" };
@@ -1316,21 +1331,10 @@ async function boot() {
       }
     } catch {}
   }
-  if (!project) {
-    try {
-      const release = await storage.published();
-      project = migrate(release.project);
-    } catch {
-      try {
-        const legacy = await storage.legacy();
-        storage.backup(legacy.project, "云端旧作品原始数据");
-        project = migrate(legacy.project);
-      } catch {
-        project = demoProject();
-      }
-    }
-  }
-  if (storage.token && !saved) {
+  if (project && archiveList()[project.id]?.deleted) project = null;
+  idleWorkspace = !project;
+  if (!project) project = newProject(); // Internal shell only; never saved until explicit creation.
+  if (!idleWorkspace && storage.token && !saved) {
     try {
       const draft = await storage.draft(project.id);
       project = migrate(draft.project);
@@ -1343,9 +1347,10 @@ async function boot() {
   selected = project.entryId;
   shell();
   storage.queue.revision = revision;
-  storage.saveLocal(project);
+  if (!idleWorkspace) storage.saveLocal(project);
   render();
-  status("已保存到本机");
+  if (idleWorkspace) await showProjects();
+  else status("已保存到本机");
 }
 async function preview({ full = false, here = false } = {}) {
   stopTimelinePlayback();
@@ -2134,6 +2139,77 @@ async function handleAction(action, button) {
         notify(e.message);
       }
       break;
+    case "batch-remove-assets": {
+      const plan = deletionPlan(p(), mediaLibrary.selected);
+      pendingAssetDeletion = plan.unused;
+      panel(
+        `<h2>删除所选素材</h2><p>可删除 ${plan.unused.length} 项未使用素材。${plan.used.length ? `另有 ${plan.used.length} 项正在使用，本次保留。` : ""}</p>${plan.used
+          .map(
+            (id) =>
+              `<p>${esc(p().assets[id].name)}：${mediaUses(p(), id)
+                .map((x) => esc(x.name))
+                .join("、")}</p>`,
+          )
+          .join(
+            "",
+          )}<p>只从当前作品素材库移除，电脑原文件保留。</p><button class="danger" data-action="confirm-batch-assets" ${plan.unused.length ? "" : "disabled"}>删除 ${plan.unused.length} 项未使用素材</button>`,
+      );
+      break;
+    }
+    case "confirm-batch-assets": {
+      const plan = deletionPlan(p(), pendingAssetDeletion);
+      mutate("批量移除素材", (project) => {
+        for (const id of plan.unused) delete project.assets[id];
+      });
+      mediaLibrary.selected.clear();
+      pendingAssetDeletion = [];
+      closePanel();
+      break;
+    }
+    case "purge-project":
+    case "clear-project-trash": {
+      if (storage.token && !projectCloudReady)
+        throw Error("请等待云端作品读取完成后再清理回收站");
+      pendingProjectPurge = projectRows
+        .filter(
+          (x) =>
+            x.deleted &&
+            (action === "clear-project-trash" || x.id === button.dataset.id),
+        )
+        .map((x) => x.id);
+      if (!pendingProjectPurge.length) break;
+      panel(
+        `<h2>${action === "clear-project-trash" ? "清空回收站" : "彻底删除作品"}</h2><p>将永久删除 ${pendingProjectPurge.length} 个作品的本机和云端草稿及对应本机恢复副本，无法恢复。已发布的作品链接保留。</p><button class="danger" data-action="confirm-project-purge">确认永久删除</button>`,
+      );
+      break;
+    }
+    case "confirm-project-purge": {
+      const rows = projectRows.filter(
+        (x) => x.deleted && pendingProjectPurge.includes(x.id),
+      );
+      const cloudIds = rows.filter((x) => x.cloud).map((x) => x.id);
+      if (cloudIds.length)
+        await response(
+          await fetch("/api/v2/purge", {
+            method: "POST",
+            headers: storage.headers({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ ids: cloudIds }),
+          }),
+        );
+      const list = archiveList();
+      for (const row of rows) {
+        delete list[row.id];
+        for (const backup of storage.backups())
+          if (backup.project?.id === row.id)
+            localStorage.removeItem(backup.key);
+        if (storage.readLocal()?.project?.id === row.id)
+          localStorage.removeItem("storyforge-v2-draft");
+      }
+      saveArchive(list);
+      pendingProjectPurge = [];
+      await showProjects();
+      break;
+    }
     case "remove-asset":
       if (references(p()).includes(button.dataset.id))
         notify(
@@ -2502,7 +2578,7 @@ async function handleAction(action, button) {
           );
         } catch {}
       panel(
-        `<h2>作品与恢复</h2><p>切换前会保留当前作品的本机备份。</p><button data-action="new-project">新建空白作品</button> <button data-action="demo">打开制作示例</button><h3>云端草稿</h3>${
+        `<h2>作品与恢复</h2><p>切换前会保留当前作品的本机备份。</p><button data-action="new-project">新建空白作品</button><h3>云端草稿</h3>${
           cloud
             .filter((x) => !x.deleted)
             .map(
@@ -2516,10 +2592,6 @@ async function handleAction(action, button) {
     }
     case "new-project":
       await adopt(newProject());
-      closePanel();
-      break;
-    case "demo":
-      await adopt(demoProject());
       closePanel();
       break;
     case "open-project": {
@@ -3936,8 +4008,8 @@ function createScene(name = "新节点", role = "story", source = "sequence") {
   newCardContext = null;
   const positions = flowPositions(p()),
     position = context?.position || {
-      x: Math.round($(".graph-scroll").scrollLeft / board.scale + 80),
-      y: Math.round($(".graph-scroll").scrollTop / board.scale + 100),
+      x: Math.round((80 - board.camera.x) / board.scale),
+      y: Math.round((100 - board.camera.y) / board.scale),
     };
   while (
     Object.values(positions).some(
@@ -4019,6 +4091,7 @@ function saveArchive(list) {
 }
 async function showProjects() {
   const request = ++projectRequest;
+  projectCloudReady = !storage.token;
   if (page !== "projects")
     workspaceReturn = {
       page,
@@ -4038,7 +4111,7 @@ async function showProjects() {
     backups,
     storage.token ? "正在读取云端作品…" : "",
   );
-  storage.saveLocal(p());
+  if (!idleWorkspace) storage.saveLocal(p());
   if (!storage.token) return;
   try {
     const cloud = await response(
@@ -4048,6 +4121,7 @@ async function showProjects() {
       }),
     );
     if (request !== projectRequest || page !== "projects") return;
+    projectCloudReady = true;
     await renderProjects(archiveList(), cloud, storage.backups());
   } catch {
     if (request === projectRequest && page === "projects")
@@ -4062,7 +4136,7 @@ async function showProjects() {
 async function renderProjects(local, cloud, backups, cloudError = "") {
   projectRows = projectCatalog(local, cloud);
   const card = (row) => {
-    const current = row.id === p().id;
+    const current = !idleWorkspace && row.id === p().id;
     return (
       '<article class="project-card" data-project-card="' +
       esc(row.id) +
@@ -4094,14 +4168,19 @@ async function renderProjects(local, cloud, backups, cloudError = "") {
     );
   };
   $(".projects-page").innerHTML =
-    '<button data-action="return-workspace">← 返回编辑</button><h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 新建作品</button><button data-action="demo">使用示例</button></div>' +
+    (idleWorkspace
+      ? ""
+      : '<button data-action="return-workspace">← 返回编辑</button>') +
+    '<h2>我的作品</h2><div class="mini-actions"><button class="primary" data-action="new-project">＋ 新建作品</button><button data-action="import">导入作品</button></div>' +
     (cloudError ? '<p role="status">' + cloudError + "</p>" : "") +
     '<div class="project-grid">' +
     projectRows
       .filter((x) => !x.deleted)
       .map(card)
       .join("") +
-    '</div><details class="project-recovery"><summary>回收站与恢复</summary>' +
+    '</div><details class="project-recovery"><summary>回收站</summary><button class="danger" data-action="clear-project-trash" ' +
+    (projectRows.some((x) => x.deleted) ? "" : "disabled") +
+    ">清空回收站</button>" +
     projectRows
       .filter((x) => x.deleted)
       .map(
@@ -4110,9 +4189,12 @@ async function renderProjects(local, cloud, backups, cloudError = "") {
           esc(x.id) +
           '">恢复 ' +
           esc(x.name) +
-          "</button>",
+          '</button><button class="danger" data-action="purge-project" data-id="' +
+          esc(x.id) +
+          '">彻底删除</button>',
       )
       .join("") +
+    '</details><details class="project-recovery"><summary>本机恢复副本</summary>' +
     backups
       .map(
         (x) =>
@@ -4182,6 +4264,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       await showProjects();
       break;
     case "return-workspace":
+      if (idleWorkspace) break;
       projectRequest++;
       if (workspaceReturn)
         ({ page, graph, selected, selection, time } = workspaceReturn);
@@ -4296,29 +4379,41 @@ async function workspaceAction(action, button = { dataset: {} }) {
           break;
         }
       }
-      if (id !== p().id)
+      if (idleWorkspace || id !== p().id)
         await adopt(migrate(value.project), value.revision || "none");
+      else {
+        projectRequest++;
+        if (workspaceReturn)
+          ({ page, graph, selected, selection, time } = workspaceReturn);
+        else {
+          page = "story";
+          graph = true;
+        }
+        render();
+      }
       closePanel();
       break;
     }
     case "delete-project": {
       const id = button.dataset.id,
         row = projectRows.find((x) => x.id === id);
-      await saveCurrent();
-      if (row.cloud && !row.cloud.deleted)
+      if (id === p().id && !idleWorkspace) await saveCurrent();
+      if (storage.token)
         await response(
           await fetch("/api/v2/archive", {
             method: "POST",
             headers: storage.headers({ "Content-Type": "application/json" }),
             body: JSON.stringify({ id, deleted: true }),
           }),
-        );
+        ).catch((error) => {
+          if (error.status !== 404) throw error;
+        });
       const list = archiveList();
       if (list[id]) {
         list[id].deleted = true;
         saveArchive(list);
       }
-      if (id === p().id) await adopt(newProject(), "none", false);
+      if (id === p().id && !idleWorkspace) await leaveDeletedProject();
       await showProjects();
       break;
     }
@@ -4346,7 +4441,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
         id = button.dataset.id;
       list[id].deleted = true;
       saveArchive(list);
-      if (id === p().id) await adopt(newProject());
+      if (id === p().id && !idleWorkspace) await leaveDeletedProject();
       await showProjects();
       break;
     }
@@ -4609,7 +4704,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "help":
       panel(
-        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处框选节点；按住空格或鼠标中键拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段只能整体移动，时间范围在右侧设置。</p>",
+        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处移动画布；Shift 拖动框选节点；按住空格或鼠标中键也可拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段只能整体移动，时间范围在右侧设置。</p>",
       );
       break;
     case "preview-desktop":
@@ -5158,7 +5253,19 @@ function timelineContext(e) {
     return;
   }
   const clip = e.target.closest("[data-clip]");
-  if (!clip) return;
+  if (!clip) {
+    e.preventDefault();
+    $(".timeline-context")?.remove();
+    const menu = document.createElement("div");
+    menu.className = "timeline-context";
+    menu.innerHTML =
+      '<button data-action="add-marker">在播放头处添加标记</button>';
+    document.body.append(menu);
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 240) + "px";
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 60) + "px";
+    menu.onclick = () => menu.remove();
+    return;
+  }
   e.preventDefault();
   $(".timeline-context")?.remove();
   stopTimelinePlayback();
@@ -5613,4 +5720,33 @@ function pasteTimelineCopied() {
   selection = { kind: kinds[entries[0].key], id: entries[0].item.id };
   render();
   revealTimelineItem(selection.id);
+}
+
+async function leaveDeletedProject() {
+  clearTimeout(saveTimer);
+  storage.queue.pending = null;
+  storage.queue.stopped = true;
+  if (storage.queue.running) await storage.queue.running;
+  stopTimelinePlayback();
+  previewSession?.dispose();
+  idleWorkspace = true;
+  dirty = false;
+  workspaceReturn = null;
+  if (storage.readLocal()?.project?.id === p().id)
+    localStorage.removeItem("storyforge-v2-draft");
+  page = "projects";
+}
+function fixInspectorHeader() {
+  if (page !== "story" || graph) return;
+  const host = $(".inspector");
+  if (host.querySelector(".inspector-body")) return;
+  const header = document.createElement("div");
+  header.className = "inspector-header";
+  const body = document.createElement("div");
+  body.className = "inspector-body";
+  for (const el of [...host.children]) {
+    if (el.matches("h2, .property-tabs")) header.append(el);
+    else body.append(el);
+  }
+  host.replaceChildren(header, body);
 }
