@@ -86,6 +86,7 @@ test("slow motion has an independent real countdown and restores only the curren
   const r = new Runtime(p);
   r.start();
   advance(r, 1000);
+  r.beginOperation();
   advance(r, 500);
   assert.equal(r.active.elapsedMs, 500);
   assert.ok(r.timeMs < 1200);
@@ -285,4 +286,48 @@ test("the actual repository project snapshot migrates and round-trips without to
     assert.equal(scene.events[0].success.timing, "sceneEnd");
     assert.equal(scene.events[0].gesture, old.qteGesture || "click");
   }
+});
+
+test("waiting window and operation deadline are independent; pause freezes both", () => {
+  const p = project(),
+    e = newEvent(2000);
+  e.endMs = 6000;
+  e.timeoutMs = 3000;
+  e.failure.target = { kind: "continue" };
+  p.scenes[0].events = [e];
+  const r = new Runtime(p);
+  r.start();
+  advance(r, 5000);
+  assert.equal(r.active.elapsedMs, 0);
+  assert.equal(r.mediaPaused, false);
+  r.beginOperation();
+  advance(r, 2000);
+  assert.equal(r.timeMs, 5000);
+  assert.equal(r.active.elapsedMs, 2000);
+  r.pause();
+  advance(r, 5000);
+  assert.equal(r.active.elapsedMs, 2000);
+  r.resume();
+  advance(r, 1000);
+  assert.equal(r.active, null);
+  advance(r, 500);
+  assert.equal(r.timeMs, 5500);
+  r.start();
+  advance(r, 6000);
+  assert.equal(r.active, null);
+  assert.equal(r.timeMs, 6000);
+  assert.equal(r.playing, true);
+});
+test("unanswered interaction follows configured failure branch once", () => {
+  const p = project(),
+    e = newEvent(1000),
+    next = newScene("失败分支");
+  e.endMs = 2000;
+  e.failure.target = { kind: "scene", sceneId: next.id };
+  p.scenes[0].events = [e];
+  p.scenes.push(next);
+  const r = new Runtime(p);
+  r.start();
+  advance(r, 2000);
+  assert.equal(r.scene.id, next.id);
 });

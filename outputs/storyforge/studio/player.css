@@ -1257,3 +1257,74 @@ button:disabled {
     animation: none;
   }
 }
+
+/* All game UI uses the same 1920-unit canvas as media and interactions. */
+.player-root .play-stage {
+  overflow: hidden;
+  background: #070c0d;
+}
+.player-root .play-stage .settings-toggle {
+  left: 48px;
+  top: 48px;
+  width: 88px;
+  height: 88px;
+  padding: 20px;
+  z-index: 10020;
+}
+.player-root .play-stage .settings-toggle svg {
+  width: 44px;
+  height: 44px;
+}
+.player-root .play-stage .settings-shade {
+  z-index: 10030;
+  justify-content: center;
+  align-items: center;
+}
+.player-root .play-stage .settings-shade .play-controls {
+  width: 640px;
+  max-width: 90%;
+  max-height: 90%;
+  box-sizing: border-box;
+  padding: 48px 52px;
+  font-size: 28px;
+  border: 1px solid #d9b56e66;
+}
+.player-root .play-stage .settings-shade .play-controls header {
+  margin-bottom: 40px;
+  font-size: 32px;
+}
+.player-root .play-stage .settings-shade .play-controls button {
+  font-size: 28px;
+  padding: 24px 0;
+}
+.player-root .play-stage .settings-shade .settings-options button {
+  min-height: 96px;
+  gap: 28px;
+}
+.player-root .play-stage .settings-shade svg {
+  width: 44px;
+  height: 44px;
+}
+.player-root .play-stage .settings-shade .play-status {
+  font-size: 24px;
+}
+
+.visual > .media-transition-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.game-paused > :not(.settings-shade),
+.game-paused > :not(.settings-shade) * {
+  animation-play-state: paused !important;
+}
+
+.play-stage .qte {
+  pointer-events: auto;
+  touch-action: none;
+}

@@ -712,7 +712,7 @@ function renderTimeline() {
                 )
                 .join("")
             : ""
-        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${validTimelineEntry(x) ? "" : "invalid-time"} ${x.kind === "event" ? "fixed-duration" : ""} ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 固定时长，整体拖动调整出现位置" : ""}">${x.kind === "event" ? '<span class="interaction-clip-icon" aria-hidden="true">◇</span>' : '<i class="handle left" data-edge="left"></i>'}<span class="clip-name">${esc(x.label)}${validTimelineEntry(x) ? "" : " · 时间待补全"}</span>${x.kind === "event" ? "" : '<i class="handle right" data-edge="right"></i>'}</div>`).join("")}</div></div>`;
+        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${validTimelineEntry(x) ? "" : "invalid-time"}  ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 拖动两端调整等待时间" : ""}"><i class="handle left" data-edge="left"></i><span class="clip-name">${esc(x.label)}${validTimelineEntry(x) ? "" : " · 时间待补全"}</span><i class="handle right" data-edge="right"></i></div>`).join("")}</div></div>`;
       })
       .join(
         "",
@@ -786,6 +786,24 @@ function renderInspectorContent() {
             .filter((a) => a.kind === obj.kind)
             .map((a) => [a.id, a.name]),
         ),
+      }) +
+      field("画面适配", "fit", obj.fit || "contain", {
+        options: { contain: "完整显示", cover: "铺满画布" },
+      }) +
+      field("横向位置 %", "x", obj.x ?? 50, {
+        type: "number",
+        min: 0,
+        max: 100,
+      }) +
+      field("纵向位置 %", "y", obj.y ?? 50, {
+        type: "number",
+        min: 0,
+        max: 100,
+      }) +
+      field("画面缩放 %", "scale", obj.scale ?? 100, {
+        type: "number",
+        min: 1,
+        max: 400,
       }) +
       seconds("节点开始（秒）", "startMs", obj.startMs) +
       seconds("素材入点（秒）", "inMs", obj.inMs) +
@@ -874,18 +892,11 @@ function renderInspectorContent() {
       field("互动类型", "kind", obj.kind, {
         options: { qte: "动作互动", choice: "分支选择", hotspot: "点击区域" },
       }) +
-      `<div class="two">${seconds("出现时间（秒）", "startMs", obj.startMs)}${seconds("区间结束（秒）", "endMs", obj.endMs)}</div>` +
-      field("结束规则", "endMode", obj.endMode, {
-        options: {
-          clock: "独立倒计时",
-          range: "到视频指定位置",
-          wait: "一直等待",
-        },
-      }) +
-      (obj.endMode === "clock"
-        ? seconds("实际操作时限（秒）", "timeoutMs", obj.timeoutMs)
+      `<div class="two">${seconds("出现时间（秒）", "startMs", obj.startMs)}${seconds("等待结束（秒）", "endMs", obj.endMs)}</div>` +
+      (obj.kind === "qte" && obj.gesture !== "click"
+        ? seconds("操作限时（秒）", "timeoutMs", obj.timeoutMs || 4000)
         : "") +
-      field("出现时暂停画面", "pause", obj.pause, { type: "checkbox" }) +
+      '<p class="muted">时间轴控制等待时间。开始操作后暂停视频，单独计时；结果按剧情设置执行。</p>' +
       conditionFields("condition", obj.condition);
     if (obj.kind !== "choice")
       html +=
@@ -937,9 +948,7 @@ function renderInspectorContent() {
           )
           .join("") +
         '<button class="full" data-action="add-option">＋ 添加选项</button>' +
-        (obj.endMode !== "wait"
-          ? resultFields("超时后", "failure", obj.failure)
-          : "");
+        resultFields("失败／超时后", "failure", obj.failure);
     html +=
       '<p class="muted">互动 UI：' +
       esc(
@@ -1178,7 +1187,16 @@ function renderSettings() {
   const box = $(".settings-page");
   if (page === "theme") {
     box.innerHTML =
-      '<h2>作品设置</h2><div class="settings-links"><button data-page="variables">剧情变量</button></div>';
+      "<h2>作品设置</h2><h3>游戏画布</h3>" +
+      field("画布比例", "canvasRatio", p().canvasRatio || 16 / 9, {
+        scope: "project",
+        options: {
+          [16 / 9]: "16:9 横向",
+          [9 / 16]: "9:16 竖向",
+          1: "1:1 方形",
+        },
+      }) +
+      '<p class="muted">视频、字幕、互动与暂停菜单共同缩放。切换预览设备不会改变作品布局。</p><div class="settings-links"><button data-page="variables">剧情变量</button></div>';
     return;
   }
   if (page === "assets") {
@@ -3065,7 +3083,7 @@ function timelinePointer(e) {
     return;
   }
   e.preventDefault();
-  const edge = clip.dataset.kind === "event" ? null : e.target.dataset.edge;
+  const edge = e.target.dataset.edge;
   if (e.shiftKey) {
     const id = clip.dataset.clip;
     if (!timelineSelection.size && selection.id && selection.id !== id)
@@ -3194,7 +3212,7 @@ function timelinePointer(e) {
         hi = lo + clipLength(trimmed);
       } else if (selection.kind !== "clip") {
         const d = editableDuration(),
-          min = selection.kind === "event" ? 0 : 100;
+          min = 100;
         const media =
           selection.kind === "audio" ||
           (selection.kind === "overlay" &&
@@ -3291,7 +3309,7 @@ function timelinePointer(e) {
           else moveVisual(s(), obj.id, before.startMs + delta);
         } else {
           const d = editableDuration(),
-            min = selection.kind === "event" ? 0 : 100;
+            min = 100;
           if (edge === "left") {
             obj.startMs = clamp(before.startMs + delta, 0, before.endMs - min);
             if (
@@ -4837,7 +4855,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "help":
       panel(
-        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处移动画布；Shift 拖动框选节点；按住空格或鼠标中键也可拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段只能整体移动，时间范围在右侧设置。</p>",
+        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处移动画布；Shift 拖动框选节点；按住空格或鼠标中键也可拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段可拖动两端调整等待范围，操作限时在右侧设置。</p>",
       );
       break;
     case "preview-desktop":

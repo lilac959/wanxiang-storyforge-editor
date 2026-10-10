@@ -380,7 +380,7 @@ function builtin(source) {
     return `assets/${source.slice(6)}.png`;
   return {
     "asset-loading-video-v1": "assets/loading-background.mp4",
-    "asset-opening-v1": "assets/opening.mp4",
+    "asset-opening-v1": "assets/opening-blue.mp4",
     "asset-loading-cover-v1": "assets/loading-cover.png",
   }[source];
 }

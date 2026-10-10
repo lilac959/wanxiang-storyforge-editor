@@ -77,7 +77,13 @@ export class Runtime {
     this.emit("resume");
   }
   get mediaPaused() {
-    return !this.playing || !!this.active?.event.pause;
+    return !this.playing || !!this.active?.operating;
+  }
+  beginOperation() {
+    if (!this.playing || !this.active || this.active.operating) return;
+    this.active.operating = true;
+    this.active.elapsedMs = 0;
+    this.emit("operation");
   }
   get rate() {
     if (!this.scene) return 1;
@@ -104,7 +110,7 @@ export class Runtime {
     const token = this.generation,
       d = duration(this.scene),
       dt = clamp(realMs, 0, 250);
-    if (!this.active?.event.pause)
+    if (!this.active?.operating)
       this.timeMs = clamp(
         Math.round(
           mediaTime === null ? this.timeMs + dt * this.rate : mediaTime,
@@ -113,11 +119,12 @@ export class Runtime {
         d,
       );
     if (this.active) {
-      this.active.elapsedMs += dt;
+      if (this.active.operating) this.active.elapsedMs += dt;
       const e = this.active.event;
       if (
-        (e.endMode === "clock" && this.active.elapsedMs >= e.timeoutMs) ||
-        (e.endMode === "range" && this.timeMs >= e.endMs)
+        (this.active.operating &&
+          this.active.elapsedMs >= (e.timeoutMs || 4000)) ||
+        (!this.active.operating && this.timeMs >= Math.min(e.endMs, d))
       )
         this.resolve(false);
     }
@@ -131,8 +138,8 @@ export class Runtime {
           continue;
         this.processed.add(event.id);
         if (!evaluate(event.condition, this.variables)) continue;
-        this.active = { event, elapsedMs: 0, progress: 0 };
-        if (event.pause) this.timeMs = event.startMs;
+        if (this.timeMs >= event.endMs) continue;
+        this.active = { event, elapsedMs: 0, progress: 0, operating: false };
         this.emit("event");
         break;
       }

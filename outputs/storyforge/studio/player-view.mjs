@@ -50,7 +50,7 @@ export class PlayerView {
     this.last = performance.now();
     this.eventId = null;
     root.innerHTML =
-      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden></div>';
+      '<div class="play-stage"><div class="visual"></div><div class="bars"><i></i><i></i></div><div class="scene-title"></div><div class="captions"></div><div class="interaction"></div><div class="feedback" aria-live="polite"></div><div class="play-message" hidden></div><button class="settings-toggle" data-player="settings" aria-label="设置" aria-expanded="false">⚙</button><div class="settings-shade" hidden></div></div>';
     this.stage = root.querySelector(".play-stage");
     this.menuMarkup(canExit);
     this.stageObserver = new ResizeObserver(() => this.fitStage());
@@ -169,7 +169,9 @@ export class PlayerView {
         return;
       const event = this.runtime.active.event;
       if (event.kind !== "qte") return;
+      if (!e.target.closest(".qte")) return;
       e.preventDefault();
+      if (event.gesture === "hold") this.runtime.beginOperation();
       this.pointer = {
         id: e.pointerId,
         x: e.clientX,
@@ -192,6 +194,10 @@ export class PlayerView {
         return;
       const event = active.event;
       if (!["left", "right", "up", "down"].includes(event.gesture)) return;
+      if (
+        Math.hypot(e.clientX - this.pointer.x, e.clientY - this.pointer.y) > 3
+      )
+        this.runtime.beginOperation();
       active.progress = swipeProgress(
         event.gesture,
         e.clientX - this.pointer.x,
@@ -219,6 +225,7 @@ export class PlayerView {
       this.hud.querySelector(".qte")?.classList.remove("qte-input");
       if (event.gesture === "click" && dist < 20) this.runtime.resolve(true);
       else if (event.gesture === "multi" && dist < 20) {
+        this.runtime.beginOperation();
         active.clicks = (active.clicks || 0) + 1;
         active.progress = active.clicks / event.clicks;
         if (active.clicks >= event.clicks) this.runtime.resolve(true);
@@ -273,10 +280,7 @@ export class PlayerView {
       `<section class="play-controls" role="dialog" aria-modal="true" aria-label="暂停与设置"><header><span>暂停与设置</span><button data-player="close-settings" aria-label="关闭暂停与设置">${icons.close}</button></header><div class="settings-options">${button("pause", "继续游玩")}${button("sound", "声音")}${button("restart", "重新开始")}</div><div class="settings-confirm" hidden><p></p><button data-player="confirm-action">确定</button><button data-player="cancel-action">取消</button></div><span class="play-status" role="status"></span></section>`;
   }
   fitStage() {
-    const media = this.visual?.querySelector("video,img");
-    const ratio =
-      (media?.videoWidth || media?.naturalWidth || 16) /
-      (media?.videoHeight || media?.naturalHeight || 9);
+    const ratio = Number(this.project?.canvasRatio) || 16 / 9;
     const fit = fittedStage(
       this.root.clientWidth,
       this.root.clientHeight,
@@ -311,7 +315,9 @@ export class PlayerView {
     this.menu.hidden = false;
     this.resetConfirmation();
     this.settingsButton.setAttribute("aria-expanded", "true");
-    this.stage.inert = true;
+    for (const child of this.stage.children)
+      if (child !== this.menu) child.inert = true;
+    this.stage.classList.add("game-paused");
     this.showSettingsButton();
     this.menu.querySelector('[data-player="pause"] span').textContent =
       "继续游玩";
@@ -321,7 +327,8 @@ export class PlayerView {
     if (!this.menuOpen) return;
     this.menuOpen = false;
     this.menu.hidden = true;
-    this.stage.inert = false;
+    for (const child of this.stage.children) child.inert = false;
+    this.stage.classList.remove("game-paused");
     this.settingsButton.setAttribute("aria-expanded", "false");
     if (restore && (this.wasPlaying || forceResume)) this.runtime?.resume();
     this.settingsButton.focus();
@@ -402,6 +409,7 @@ export class PlayerView {
 
     this.root.style.setProperty("--work-accent", theme.accent);
     this.root.style.setProperty("--work-text", theme.text);
+    this.fitStage();
   }
   async renderStill(project, scene, time = 0, focusEvent = null) {
     const request = (this.stillRequest = (this.stillRequest || 0) + 1);
@@ -480,8 +488,18 @@ export class PlayerView {
     const current = mediaAt(scene, time);
     this.currentClip = current;
     this.mountedClipId = current?.id || "gap";
+    // Retain the last decoded frame until the replacement media is ready.
+    let previousFrame;
+    if (this.video?.readyState >= 2) {
+      previousFrame = document.createElement("canvas");
+      previousFrame.width = this.video.videoWidth;
+      previousFrame.height = this.video.videoHeight;
+      previousFrame.getContext("2d").drawImage(this.video, 0, 0);
+      previousFrame.className = "media-transition-frame";
+    }
     this.cleanupMedia();
     this.visual.innerHTML = "";
+    if (previousFrame) this.visual.append(previousFrame);
     this.message.hidden = true;
     this.eventId = null;
     this.hud.innerHTML = "";
@@ -539,6 +557,17 @@ export class PlayerView {
         if (token !== this.token) return;
         if (current.outMs > v.duration * 1000 + 100)
           throw Error("视频时长短于节点设置，请检查素材与出点");
+        const releaseFrame = () => {
+          if (token === this.token) previousFrame?.remove();
+        };
+        v.addEventListener("seeked", releaseFrame, { once: true });
+        v.addEventListener(
+          "loadeddata",
+          () => {
+            if (!v.seeking) releaseFrame();
+          },
+          { once: true },
+        );
         v.currentTime = sourceTime(this.currentClip, time) / 1000;
         v.onerror = () => {
           if (token === this.token)
@@ -565,7 +594,10 @@ export class PlayerView {
         img.alt = scene.name;
         this.visual.append(img);
         this.image = img;
-        img.onload = () => this.fitStage();
+        img.onload = () => {
+          this.fitStage();
+          previousFrame?.remove();
+        };
         if (scene.source === "sequence")
           img.src = await this.assets.url(this.project.assets[current.assetId]);
         else await this.paintImage(scene, time, token);
@@ -664,27 +696,8 @@ export class PlayerView {
     if (event.type === "result") {
       this.interactionUntil = performance.now() + 500;
       this.pointer = null;
-      qteAudio.result(event.ok);
-      if (["qte", "choice"].includes(event.event.kind)) {
-        const ghost = this.hud.cloneNode(true);
-        ghost.classList.add("legacy-result");
-        ghost.inert = true;
-        const qte = ghost.querySelector(".qte");
-        if (qte) {
-          qte.classList.add(event.ok ? "qte-success" : "qte-failed");
-          qte.style.setProperty("--qte-progress", event.ok ? "100" : "0");
-        }
-        this.stage.append(ghost);
-        setTimeout(() => ghost.remove(), 260);
-      }
-      const el = this.root.querySelector(".feedback");
-      el.textContent = event.ok ? "✓ 操作成功" : "操作超时";
-      el.classList.remove("show");
-      void el.offsetWidth;
-      if (event.event.kind === "hotspot") el.classList.add("show");
-      setTimeout(() => {
-        if (!this.runtime?.active) qteAudio.stop();
-      }, 300);
+      qteAudio.stop();
+      this.root.querySelector(".feedback").textContent = "";
     }
     if (event.type === "complete") {
       this.cleanupMedia();
@@ -732,7 +745,7 @@ export class PlayerView {
       if (r.mediaPaused || r.timeMs >= duration(r.scene)) {
         this.video.pause();
         if (
-          r.active?.event.pause &&
+          r.active?.operating &&
           Math.abs(
             timelineTime(this.currentClip, this.video.currentTime * 1000) -
               r.timeMs,
@@ -865,20 +878,18 @@ export class PlayerView {
   }
   fitOpeningLayer() {
     if (!this.openingLayer) return;
-    const media = this.visual.querySelector("video,img"),
-      ratio =
-        (media?.videoWidth || media?.naturalWidth || 16) /
-        (media?.videoHeight || media?.naturalHeight || 9);
-    const width = Math.min(
-        this.stage.clientWidth,
-        this.stage.clientHeight * ratio,
-      ),
-      frame = this.openingLayer.firstElementChild;
-    frame.style.width = width + "px";
-    frame.style.height = width / ratio + "px";
+    const frame = this.openingLayer.firstElementChild;
+    frame.style.width = this.stage.clientWidth + "px";
+    frame.style.height = this.stage.clientHeight + "px";
   }
   paintScene(scene, time) {
     this.paintOpening(scene, time);
+    const media = this.visual.querySelector("video,img");
+    const current = mediaAt(scene, time);
+    if (media) {
+      media.style.objectFit = current?.fit === "cover" ? "cover" : "contain";
+      media.style.transform = `translate(${(current?.x ?? 50) - 50}%, ${(current?.y ?? 50) - 50}%) scale(${(current?.scale ?? 100) / 100})`;
+    }
     if (
       scene.source === "sequence" &&
       !this.loading &&
@@ -1048,12 +1059,9 @@ export class PlayerView {
     const active = this.runtime?.active;
     if (!active) return;
     const e = active.event;
-    const remaining =
-      e.endMode === "clock"
-        ? Math.max(0, e.timeoutMs - active.elapsedMs)
-        : e.endMode === "range"
-          ? Math.max(0, e.endMs - this.runtime.timeMs)
-          : null;
+    const remaining = active.operating
+      ? Math.max(0, (e.timeoutMs || 4000) - active.elapsedMs)
+      : Math.max(0, e.endMs - this.runtime.timeMs);
     const el = this.hud.querySelector(".qte");
     if (el) {
       el.style.setProperty("--progress", String((active.progress || 0) * 100));

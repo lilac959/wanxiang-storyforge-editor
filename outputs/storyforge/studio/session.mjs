@@ -37,10 +37,7 @@ export class Session {
     const opening = this.root.querySelector(".opening");
     const frame = opening.querySelector(".opening-frame");
     const fit = () => {
-      const ratio = media
-        ? (media.videoWidth || media.naturalWidth || 16) /
-          (media.videoHeight || media.naturalHeight || 9)
-        : 16 / 9;
+      const ratio = Number(this.project?.canvasRatio) || 16 / 9;
       const style = getComputedStyle(opening);
       const width =
         opening.clientWidth -
