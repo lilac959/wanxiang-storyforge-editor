@@ -206,7 +206,7 @@ export function itemTrackId(scene, item, kind) {
 }
 export function interactionConflicts(scene) {
   const conflicts = [],
-    events = scene.events || [];
+    events = (scene.events || []).filter((e) => e.enabled !== false);
   for (let i = 0; i < events.length; i++)
     for (let j = 0; j < i; j++) {
       const a = events[i],

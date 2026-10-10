@@ -6,6 +6,18 @@ import {
   splitRange,
 } from "./media-editing.mjs";
 import { timelineThumbnail, audioWaveform } from "./timeline-media.mjs";
+import {
+  SHORTCUTS,
+  shortcutAction,
+  splitAt,
+  trimRight,
+  packMain,
+  copyProperties,
+  pasteProperties,
+  restoreAudio,
+} from "./timeline-shortcuts.mjs";
+import { timelineEntries } from "./timeline-selection.mjs";
+let timelineProperties = null;
 import { rulerTicks, previewRate, zoomScroll } from "./timeline-controls.mjs";
 import {
   moveSelection,
@@ -201,7 +213,50 @@ function mutate(label, fn) {
   try {
     history.commit(label, (project) => {
       for (const scene of project.scenes) materializeTracks(scene);
+      const editedScene = project.scenes.find((c) => c.id === selected);
+      const lockedBefore =
+        page === "story" && !graph && editedScene
+          ? new Map(
+              timelineEntries(editedScene)
+                .filter((x) => timelineLockedIds().has(x.item.id))
+                .map((x) => [x.item.id, JSON.stringify(x.item)]),
+            )
+          : new Map();
+      const beforeMain = editedScene
+        ? JSON.stringify(
+            visualClips(editedScene).map((c) => [
+              c.id,
+              c.startMs,
+              c.inMs,
+              c.outMs,
+            ]),
+          )
+        : null;
       fn(project);
+      if (
+        page === "story" &&
+        !graph &&
+        editedScene &&
+        s() &&
+        s().id === editedScene.id &&
+        s().editorTimeline?.magnet &&
+        beforeMain !==
+          JSON.stringify(
+            visualClips(s()).map((c) => [c.id, c.startMs, c.inMs, c.outMs]),
+          )
+      ) {
+        if (previewTracks().locked.has("main")) throw Error("主画面轨道已锁定");
+        packMain(s());
+      }
+      for (const [id, before] of lockedBefore) {
+        const after = project.scenes.find((c) => c.id === editedScene.id);
+        if (
+          JSON.stringify(
+            after && timelineEntries(after).find((x) => x.item.id === id)?.item,
+          ) !== before
+        )
+          throw Error("操作会改变锁定轨道上的关联片段，请先解锁");
+      }
       for (const scene of project.scenes) {
         consolidateInteractionTracks(scene, {
           force: true,
@@ -363,7 +418,7 @@ function resultFields(label, path, r) {
 }
 function shell() {
   $("#studio").innerHTML =
-    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="connect">连接云端授权</button><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><div class="transport-time"><span class="time-label"></span><span class="duration-label"></span></div><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><details class="more-menu transport-display"><summary title="预览尺寸">预览显示</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details><input id="seek" type="range" min="0" step="10" aria-label="画面进度"></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容">删除</button><button data-action="toggle-snap" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
+    '<header class="topbar"><div class="brand"><b>T</b>故事引擎 TaleSpark</div><span class="top-divider"></span><span class="project-name" aria-label="作品名称"></span><span class="save-status"></span><button data-action="undo" aria-label="撤销" title="撤销 Ctrl+Z">↶</button><button data-action="redo" aria-label="重做" title="重做 Ctrl+Shift+Z">↷</button><button data-action="save">保存</button><details class="more-menu general-menu"><summary aria-label="通用菜单" title="通用菜单">☰</summary><div><button data-action="import">导入作品</button><button data-action="export">导出备份</button><hr><button data-action="check-project">检查作品</button><button data-action="versions">发布历史</button><hr><button data-action="connect">连接云端授权</button><button data-action="help">帮助与快捷键</button></div></details><button data-action="preview-all">▷ 完整试玩</button><button class="primary" data-action="publish">发布</button></header>\n<div class="layout"><nav class="rail"><button data-page="story" title="剧情画布"><b>⌘</b>画布</button><button data-page="assets" title="素材库"><b>▧</b>素材</button><button data-page="theme" title="作品设置"><b>⚙</b>设置</button><button class="bottom" data-action="projects" title="作品管理"><b>▦</b>作品</button></nav><aside class="library"></aside><main class="workspace"><div class="workspace-head"><button data-action="graph-view" class="back-button" title="返回剧情画布">← 画布</button><h1>剧情画布</h1><button data-action="canvas-view">进入编辑</button><button data-action="preview-current">▷ 试玩当前节点</button></div><div class="story-work"><div class="canvas-label"><span></span></div><div class="canvas"><div class="player-root"></div></div><div class="board-list" hidden></div><div class="transport"><div class="transport-time"><span class="time-label"></span><span class="duration-label"></span></div><button data-action="preview-here" aria-label="播放预览" title="播放预览（空格）">▷ 播放</button><details class="more-menu transport-display"><summary title="预览尺寸">预览显示</summary><div><button data-action="preview-desktop">桌面预览</button><button data-action="preview-portrait">手机竖屏</button><button data-action="preview-landscape">手机横屏</button></div></details><input id="seek" type="range" min="0" step="10" aria-label="画面进度"></div><div class="timeline-head"><span>时间轴</span><div class="clip-tools"><button data-action="split-clip" title="在播放头处分割 C">分割</button><button data-action="copy-item" title="复制选中内容 Ctrl+C">复制</button><button data-action="paste-item" title="粘贴到播放指针 Ctrl+V">粘贴</button><button data-action="delete-item" title="删除选中内容 Backspace">删除</button><button data-action="toggle-magnet" title="主轨磁吸 P">主轨磁吸：关</button><button data-action="toggle-linkage" title="联动 ~">联动：开</button><button data-action="toggle-snap" title="吸附 N" aria-pressed="true">吸附：开</button><button data-action="fit-timeline">显示全部</button></div><label>缩放 <input id="zoom" type="range" min="1" max="8" step=".25" value="1.5"></label></div><div class="timeline-actions"><button data-action="upload-scene">＋ 素材</button><button data-action="add-qte">动作互动</button><button data-action="add-choice">分支选择</button><button data-action="add-hotspot">点击区域</button><button data-action="add-subtitle">字幕</button><button data-action="add-audio">音频</button><button data-action="add-overlay">叠加画面</button><details class="more-menu"><summary>效果</summary><div><button data-action="add-bars">电影黑边</button></div></details></div><div class="timeline-scroll" tabindex="0" aria-label="时间轴编辑区"></div></div><div class="graph-area"><div class="graph-toptools"><button data-action="toggle-directory" title="展开或收起节点目录">节点目录</button><button class="primary" data-action="new-card">＋ 新建节点</button><div class="selection-tools"><button data-action="copy-scenes">复制</button><button data-action="delete-scenes">删除</button></div></div><div class="graph-scroll"><div class="graph-board"></div></div><div class="graph-bottomtools"><span></span><button data-action="zoom-out" aria-label="缩小画布">−</button><button data-action="reset-zoom" id="graph-scale" title="恢复 100%">100%</button><button data-action="zoom-in" aria-label="放大画布">＋</button><button data-action="fit-graph">适应画布</button><details class="more-menu graph-view-menu"><summary>视图</summary><div><button data-action="pan-mode">拖动画布</button><button data-action="select-mode">框选节点</button><hr><button data-action="toggle-lines" aria-pressed="false">显示全部连线</button><button data-action="toggle-minimap" aria-pressed="true">显示小地图</button><button data-action="locate-entry">定位起始节点</button><button data-action="arrange-selection">整理选中节点</button></div></details><button data-action="arrange-graph" title="按剧情关系整理全部">整理布局</button></div><div class="minimap" title="点击定位节点"></div></div><div class="opening-work" hidden><div class="opening-preview"></div><div class="opening-transport"><button data-action="opening-play">▷ 播放</button><input type="range" id="opening-seek" min="0" max="100" step="0.01" value="0" aria-label="开场视频进度"><span class="opening-time">0.0s</span></div></div><div class="settings-page" hidden></div><div class="projects-page" hidden></div></main><aside class="inspector"></aside></div>';
   setupEditingLayout();
   still = new PlayerView($(".canvas .player-root"), assets, {
     editing: true,
@@ -681,6 +736,19 @@ function items() {
   return list;
 }
 function renderTimeline() {
+  if (page !== "story" || !s()) return;
+  for (const [action, key, label, fallback] of [
+    ["toggle-magnet", "magnet", "主轨磁吸", false],
+    ["toggle-linkage", "linkage", "联动", true],
+  ]) {
+    const button = $(`[data-action="${action}"]`),
+      enabled = s().editorTimeline?.[key] ?? fallback;
+    if (button) {
+      button.textContent = label + "：" + (enabled ? "开" : "关");
+      button.setAttribute("aria-pressed", String(enabled));
+    }
+  }
+
   if (page !== "story") return;
   const d = timelineSpan();
   const all = items(),
@@ -750,7 +818,7 @@ function renderTimeline() {
                 )
                 .join("")
             : ""
-        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${validTimelineEntry(x) ? "" : "invalid-time"}  ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 拖动两端调整等待时间" : ""}"><i class="handle left" data-edge="left"></i><span class="clip-name">${esc(x.label)}${validTimelineEntry(x) ? "" : " · 时间待补全"}</span><i class="handle right" data-edge="right"></i></div>`).join("")}</div></div>`;
+        }${row.items.map((x) => `<div tabindex="0" role="button" aria-label="${esc(x.label)}" data-clip="${esc(x.id)}" data-kind="${x.kind}" class="clip ${x.kind} ${timelineEntries(s()).find((e) => e.item.id === x.id)?.item.enabled === false ? "clip-disabled" : ""} ${validTimelineEntry(x) ? "" : "invalid-time"}  ${selection.id === x.id || timelineSelection.has(x.id) ? "selected" : ""}" style="${timelineItemStyle(x, d)}" title="${esc(x.label)} · ${sec(x.start)}—${sec(x.end)} 秒${x.kind === "event" ? " · 拖动两端调整等待时间" : ""}"><i class="handle left" data-edge="left"></i><span class="clip-name">${esc(x.label)}${validTimelineEntry(x) ? "" : " · 时间待补全"}</span><i class="handle right" data-edge="right"></i></div>`).join("")}</div></div>`;
       })
       .join(
         "",
@@ -2448,6 +2516,12 @@ async function handleAction(action, button) {
     case "preview-all":
       await preview({ full: true });
       break;
+    case "toggle-magnet":
+      await timelineShortcut("magnet");
+      break;
+    case "toggle-linkage":
+      await timelineShortcut("linkage");
+      break;
     case "toggle-snap":
       snapEnabled = !snapEnabled;
       button.textContent = snapEnabled ? "吸附：开" : "吸附：关";
@@ -3103,6 +3177,8 @@ function beginTimelineGroupDrag(e) {
 function timelinePointer(e) {
   if (e.button === 1) return beginTimelinePan(e);
   if (e.button !== 0 || e.target.closest("[data-action]")) return;
+  e.currentTarget.tabIndex = 0;
+  e.currentTarget.focus({preventScroll:true});
   let clip = e.target.closest("[data-clip]");
   if (
     clip &&
@@ -3820,6 +3896,7 @@ document.addEventListener("change", (e) => {
   }
 });
 document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.isComposing) return;
   if ($("#preview").open) return;
   if (
     !e.target.matches("input,textarea,select,[contenteditable]") &&
@@ -3848,11 +3925,17 @@ document.addEventListener("keydown", (e) => {
     }
   }
   const editing = e.target.matches("input,textarea,select,[contenteditable]");
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "s") {
     e.preventDefault();
     sync();
   }
-  if ((e.ctrlKey || e.metaKey) && !editing && e.key.toLowerCase() === "z") {
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    !editing &&
+    !document.querySelector("dialog[open]") &&
+    (page !== "story" || graph) &&
+    e.key.toLowerCase() === "z"
+  ) {
     e.preventDefault();
     e.shiftKey ? history.redo() : history.undo();
   }
@@ -4941,7 +5024,7 @@ async function workspaceAction(action, button = { dataset: {} }) {
       break;
     case "help":
       panel(
-        "<h2>快捷操作</h2><p>双击节点进入编辑；拖动空白处移动画布；Shift 拖动框选节点；按住空格或鼠标中键也可拖动画布。</p><p>Ctrl / ⌘ + 滚轮缩放画布。Ctrl / ⌘ + Z 撤销，Shift + Ctrl / ⌘ + Z 重做，Ctrl / ⌘ + S 保存。</p><p>时间轴：空格播放 / 暂停；拖动播放指针查看画面；拖动空白处框选，Shift 点击多选；Ctrl / ⌘ + C 复制、V 粘贴、B 分割；Delete 删除并保留空隙。方向键逐帧，Shift + 方向键移动 1 秒。互动片段可拖动两端调整等待范围，操作限时在右侧设置。</p>",
+        `<h2>时间轴快捷键</h2><p>输入文字和弹窗内不触发。空格播放／暂停；锁定轨道不允许修改。</p><table><thead><tr><th>操作</th><th>快捷键</th></tr></thead><tbody>${SHORTCUTS.map(([label, key]) => `<tr><td>${label}</td><td>${key}</td></tr>`).join("")}</tbody></table>`,
       );
       break;
     case "preview-desktop":
@@ -5403,82 +5486,195 @@ function timelineWheel(e) {
 function previewKeys(e) {
   if (
     e.defaultPrevented ||
+    e.isComposing ||
     page !== "story" ||
     graph ||
-    e.target.closest(
-      'input:not([type="range"]),textarea,select,[contenteditable="true"]',
-    ) ||
+    e.target.closest("input,textarea,select,[contenteditable],.inspector") ||
     document.querySelector("dialog[open]")
   )
     return;
+  if (e.key === "Escape") {
+    if (canvasTransform?.active) return;
+    cancelTimelineGesture?.();
+    clearCanvasSelection();
+    $(".timeline-context")?.remove();
+    return;
+  }
   if (e.code === "Space") {
     e.preventDefault();
-    if (e.repeat) return;
-    toggleTimelinePlayback();
-  } else if (
-    ["ArrowLeft", "ArrowRight"].includes(e.key) &&
-    !e.altKey &&
-    !e.ctrlKey &&
-    !e.metaKey
-  ) {
-    e.preventDefault();
+    if (!e.repeat) toggleTimelinePlayback();
+    return;
+  }
+  const action = shortcutAction(e);
+  if (!action) return;
+  e.preventDefault();
+  if (
+    e.repeat &&
+    !["previous-frame", "next-frame", "zoom-in", "zoom-out"].includes(action)
+  )
+    return;
+  timelineShortcut(action).catch((error) => notify(error.message));
+}
+function timelineLockedIds() {
+  return new Set(
+    [...$(".timeline-scroll").querySelectorAll("[data-clip]")]
+      .filter((el) =>
+        previewTracks().locked.has(el.closest(".track").dataset.trackId),
+      )
+      .map((el) => el.dataset.clip),
+  );
+}
+async function timelineShortcut(action) {
+  const ids = selectedTimelineIds();
+  if (["previous-frame", "next-frame", "first", "last"].includes(action)) {
     stopTimelinePlayback();
-    time = clamp(
-      time + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1000 : 1000 / 30),
-      0,
-      editableDuration(),
-    );
+    const frameMs = 1000 / (p().frameRate || 30);
+    time =
+      action === "first"
+        ? 0
+        : action === "last"
+          ? editableDuration()
+          : clamp(
+              time + (action === "previous-frame" ? -frameMs : frameMs),
+              0,
+              editableDuration(),
+            );
     updatePlayhead();
     queueStill();
     followPlayhead();
-  } else if (e.key === "Escape") {
-    if (canvasTransform?.active) return;
+    return;
+  }
+  if (action === "zoom-in" || action === "zoom-out") {
+    setTimelineZoom(zoom * (action === "zoom-in" ? 1.25 : 0.8));
+    return;
+  }
+  if (action === "fit") {
+    setTimelineZoom(1, 70);
+    return;
+  }
+  if (action === "undo" || action === "redo") {
+    stopTimelinePlayback();
+    history[action]();
+    return;
+  }
+  if (action === "snap") {
+    await handleAction("toggle-snap", $('[data-action="toggle-snap"]'));
+    return;
+  }
+  if (action === "magnet" || action === "linkage") {
+    mutate("切换时间轴开关", () => {
+      s().editorTimeline ||= {};
+      const defaultValue = action === "linkage";
+      s().editorTimeline[action] = !(
+        s().editorTimeline[action] ?? defaultValue
+      );
+    });
+    return;
+  }
+  if (action === "select") {
     cancelTimelineGesture?.();
+    $(".timeline-scroll").focus();
+    notify("选择工具：点击选择，拖动空白处框选");
+    return;
+  }
+  if (action.startsWith("select-")) {
+    ensureSequence(s());
     timelineSelection.clear();
     selection = { kind: "scene" };
-    $(".timeline-context")?.remove();
+    for (const x of timelineEntries(s()))
+      if (
+        !timelineLockedIds().has(x.item.id) &&
+        (action === "select-all" ||
+          (action === "select-left" && x.start < time) ||
+          (action === "select-right" && x.end > time))
+      )
+        timelineSelection.add(x.item.id);
     renderTimeline();
     renderInspector();
     markPreviewSelection();
-  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-    e.preventDefault();
-    timelineSelection.clear();
-    for (const clip of $(".timeline-scroll").querySelectorAll("[data-clip]"))
-      if (
-        !previewTracks().locked.has(clip.closest(".track").dataset.trackId) &&
-        clip.dataset.kind !== "opening"
-      )
-        timelineSelection.add(clip.dataset.clip);
-    renderTimeline();
-  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
-    try {
-      timelineClipboard = copySelection(s(), selectedTimelineIds());
-      e.preventDefault();
-    } catch (error) {
-      notify(error.message);
-    }
-  } else if (
-    (e.ctrlKey || e.metaKey) &&
-    e.key.toLowerCase() === "v" &&
-    timelineClipboard
-  ) {
-    e.preventDefault();
-    try {
-      pasteTimelineCopied();
-    } catch (error) {
-      notify(error.message);
-    }
-  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-    e.preventDefault();
-    handleAction("split-clip", { dataset: {} }).catch((error) =>
-      notify(error.message),
-    );
-  } else if (e.key === "Delete") {
-    e.preventDefault();
-    try {
+    return;
+  }
+  if (action === "marker") {
+    await handleAction("add-marker", { dataset: {} });
+    return;
+  }
+  if (action === "copy" || action === "cut") {
+    timelineClipboard = copySelection(s(), ids);
+    if (action === "cut") {
+      stopTimelinePlayback();
       deleteTimelineSelected();
-    } catch (error) {
-      notify(error.message);
+    }
+    return;
+  }
+  if (action === "paste") {
+    stopTimelinePlayback();
+    pasteTimelineCopied();
+    return;
+  }
+  if (action === "copy-properties") {
+    timelineProperties = copyProperties(s(), selection.id || [...ids][0]);
+    notify("已复制片段属性");
+    return;
+  }
+  if (action === "split-all") {
+    stopTimelinePlayback();
+    mutate("批量分割", () =>
+      splitAt(s(), Math.round(time), null, timelineLockedIds()),
+    );
+    return;
+  }
+  assertTimelineUnlocked(ids);
+  stopTimelinePlayback();
+  if (action === "delete") {
+    deleteTimelineSelected();
+    return;
+  }
+  if (action === "split") {
+    mutate("分割选中片段", () => splitAt(s(), Math.round(time), ids));
+    return;
+  }
+  if (action === "trim-right") {
+    mutate("向右裁剪", () => trimRight(s(), ids, Math.round(time)));
+    return;
+  }
+  if (action === "paste-properties") {
+    mutate("粘贴片段属性", () => pasteProperties(s(), ids, timelineProperties));
+    return;
+  }
+  if (action === "toggle-enabled") {
+    if (!ids.size) throw Error("请选择片段");
+    mutate("启用／停用片段", () => {
+      const items = timelineEntries(s()).filter((x) => ids.has(x.item.id));
+      const enable = items.every((x) => x.item.enabled === false);
+      for (const x of items) x.item.enabled = enable;
+    });
+    return;
+  }
+  if (action === "toggle-audio") {
+    ensureSequence(s());
+    const selectedAudio = s().audio.find(
+      (a) => ids.has(a.id) && a.detachedFrom,
+    );
+    const clip =
+      s().clips.find((c) => ids.has(c.id) && c.kind === "video") ||
+      s().clips.find((c) => c.id === selectedAudio?.detachedFrom);
+    if (!clip) throw Error("请选择视频或其分离音频");
+    if (clip.audioDetached) {
+      assertTimelineUnlocked(
+        new Set([
+          clip.id,
+          ...s()
+            .audio.filter((a) => a.detachedFrom === clip.id)
+            .map((a) => a.id),
+        ]),
+      );
+      mutate("还原视频音频", () => restoreAudio(s(), clip));
+      selection = { kind: "clip", id: clip.id };
+      timelineSelection.clear();
+      render();
+    } else {
+      selection = { kind: "clip", id: clip.id };
+      await handleAction("detach-audio", { dataset: {} });
     }
   }
 }

@@ -75,19 +75,24 @@ export function separateAudio(scene, clip) {
 }
 
 export function splitRange(scene, item, kind, time) {
-  const key = { audio: "audio", subtitle: "subtitles", overlay: "overlays" }[
-    kind
-  ];
+  const key = {
+    audio: "audio",
+    subtitle: "subtitles",
+    overlay: "overlays",
+    event: "events",
+    effect: "effects",
+  }[kind];
   if (!key || time - item.startMs < 100 || item.endMs - time < 100)
     throw Error("请将播放指针放在片段内部");
   const right = structuredClone(item);
   right.id = `${kind}-${crypto.randomUUID()}`;
   right.startMs = Math.round(time);
-  if (kind !== "subtitle")
+  if (["audio", "overlay"].includes(kind))
     right.inMs = Math.round(
       (item.inMs || 0) + (time - item.startMs) * mediaRate(item),
     );
   item.endMs = right.startMs;
+  right.options?.forEach((o) => (o.id = `option-${crypto.randomUUID()}`));
   scene[key].push(right);
   return right;
 }

@@ -116,6 +116,7 @@ export class Runtime {
     return (
       this.scene.effects.find(
         (e) =>
+          e.enabled !== false &&
           e.kind === "speed" &&
           !this.suppressedSpeeds.has(e.id) &&
           this.timeMs >= e.startMs &&
@@ -186,9 +187,9 @@ export class Runtime {
       }
     }
     if (!openingRole(this.scene)) {
-      const events = [...this.scene.events].sort(
-        (a, b) => a.startMs - b.startMs,
-      );
+      const events = this.scene.events
+        .filter((e) => e.enabled !== false)
+        .sort((a, b) => a.startMs - b.startMs);
       for (const event of events) {
         if (this.processed.has(event.id) || event.startMs > this.timeMs)
           continue;
@@ -294,6 +295,7 @@ export class Runtime {
     this.pending = null;
     this.generation++;
     for (const e of this.scene.events) {
+      if (e.enabled === false) continue;
       if (e.startMs < to) this.processed.add(e.id);
       else if (to <= from) this.processed.delete(e.id);
     }

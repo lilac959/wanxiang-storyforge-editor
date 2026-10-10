@@ -2884,3 +2884,5 @@ body[data-view="scene"] .timeline-head {
 .clip:active {
   cursor: grabbing;
 }
+
+.clip.clip-disabled { opacity: .4; filter: grayscale(1); }

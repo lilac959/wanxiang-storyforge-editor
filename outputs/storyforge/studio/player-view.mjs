@@ -494,7 +494,9 @@ export class PlayerView {
     const events = openingRole(scene)
       ? []
       : scene.events.filter(
-          (e) => e.id === focusEvent || (time >= e.startMs && time < e.endMs),
+          (e) =>
+            e.enabled !== false &&
+            (e.id === focusEvent || (time >= e.startMs && time < e.endMs)),
         );
     this.paintEvents(events, scene);
     for (const clip of scene.audio) {
@@ -502,6 +504,7 @@ export class PlayerView {
       if (!audio) continue;
       const active =
         this.timelinePlaying &&
+        clip.enabled !== false &&
         !this.previewHiddenTracks?.has(itemTrackId(scene, clip, "audio")) &&
         time >= clip.startMs &&
         time < clip.endMs;
@@ -860,6 +863,7 @@ export class PlayerView {
       const a = this.audio.get(clip.id);
       if (!a) continue;
       const active =
+        clip.enabled !== false &&
         !r.scene.previewHiddenTracks?.includes(
           itemTrackId(r.scene, clip, "audio"),
         ) &&
@@ -991,6 +995,7 @@ export class PlayerView {
     const captions = scene.subtitles
       .filter(
         (c) =>
+          c.enabled !== false &&
           !scene.previewHiddenTracks?.includes(
             itemTrackId(scene, c, "subtitle"),
           ) &&
@@ -1007,7 +1012,11 @@ export class PlayerView {
     const host = this.root.querySelector(".captions");
     if (host.innerHTML !== html) host.innerHTML = html;
     const bars = scene.effects.find(
-      (e) => e.kind === "bars" && time >= e.startMs && time < e.endMs,
+      (e) =>
+        e.enabled !== false &&
+        e.kind === "bars" &&
+        time >= e.startMs &&
+        time < e.endMs,
     );
     let height = 0;
     if (bars) {
@@ -1035,6 +1044,7 @@ export class PlayerView {
     }
     const list = (scene.overlays || []).filter(
       (x) =>
+        x.enabled !== false &&
         time >= x.startMs &&
         time < x.endMs &&
         !scene.previewHiddenTracks?.includes(

@@ -13,7 +13,11 @@ export function zoomScroll(anchor, newWidth, viewportX) {
 export function previewRate(scene, time) {
   return (
     scene.effects?.find(
-      (x) => x.kind === "speed" && time >= x.startMs && time < x.endMs,
+      (x) =>
+        x.enabled !== false &&
+        x.kind === "speed" &&
+        time >= x.startMs &&
+        time < x.endMs,
     )?.value || 1
   );
 }

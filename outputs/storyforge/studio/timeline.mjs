@@ -55,8 +55,17 @@ export function mediaAt(s, time) {
   const clips = visualClips(s),
     end = Math.max(0, ...clips.map((c) => c.startMs + clipLength(c)));
   return (
-    clips.find((c) => time >= c.startMs && time < c.startMs + clipLength(c)) ||
-    (time === end ? clips.find((c) => c.startMs + clipLength(c) === end) : null)
+    clips.find(
+      (c) =>
+        c.enabled !== false &&
+        time >= c.startMs &&
+        time < c.startMs + clipLength(c),
+    ) ||
+    (time === end
+      ? clips.find(
+          (c) => c.enabled !== false && c.startMs + clipLength(c) === end,
+        )
+      : null)
   );
 }
 export function ensureSequence(s) {
@@ -88,6 +97,7 @@ export function appendVisual(s, a) {
   return c;
 }
 export function linked(s, cid) {
+  if (s.editorTimeline?.linkage === false) return [];
   return ["events", "subtitles", "audio", "effects", "overlays"].flatMap((k) =>
     (s[k] || []).filter((x) => x.linkedClipId === cid),
   );
