@@ -206,8 +206,10 @@ export class Runtime {
     }
     if (!this.active && this.timeMs >= d) {
       if (openingRole(this.scene)) {
-        if (this.scene.opening?.loop) this.enter(this.scene.id);
-        else {
+        if (this.scene.opening?.loop) {
+          this.timeMs = 0;
+          this.emit("loop");
+        } else {
           this.pause();
           this.emit("tick");
         }

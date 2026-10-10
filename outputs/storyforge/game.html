@@ -11,8 +11,35 @@
   </head>
   <body>
     <main id="game" class="game-shell">
-      <div class="opening"><p>正在读取作品…</p></div>
+      <div class="opening"><div class="opening-frame"></div></div>
     </main>
+    <script>
+      // The previous visit's cover can paint before module/config requests finish.
+      try {
+        const params = new URLSearchParams(location.search);
+        const cover = JSON.parse(
+          localStorage.getItem(
+            "storyforge-cover:" +
+              (params.get("version") || params.get("project") || "default"),
+          ) || "null",
+        );
+        if (cover) {
+          const url = new URL(cover.url, location.href);
+          if (
+            url.origin === location.origin &&
+            ["https:", "http:"].includes(url.protocol)
+          ) {
+            const image = new Image();
+            image.alt = "加载封面";
+            image.src = url.href;
+            const frame = document.querySelector(".opening-frame");
+            frame.style.width = "100%";
+            frame.style.height = "100%";
+            frame.append(image);
+          }
+        }
+      } catch {}
+    </script>
     <script type="module" src="studio/game.mjs"></script>
   </body>
 </html>

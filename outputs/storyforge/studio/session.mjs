@@ -4,6 +4,7 @@ import { inspect, resolveOpeningMedia } from "./assets.mjs";
 import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 import { openingCard } from "./model.mjs";
+import { preloadProject } from "./preload.mjs";
 export class Session {
   constructor(
     root,
@@ -18,9 +19,13 @@ export class Session {
     this.token = 0;
   }
   clear() {
+    this.preloadController?.abort();
+    this.preloadController = null;
     this.token++;
     this.openingObserver?.disconnect();
     this.player?.dispose();
+    this.pendingPlayer?.dispose();
+    this.pendingPlayer = null;
     this.player = null;
     this.root.querySelectorAll("video,audio").forEach((v) => {
       v.pause();
@@ -67,10 +72,10 @@ export class Session {
     const p = this.project,
       token = this.token;
     if (p.unifiedCards) {
-      await resolveOpeningMedia(p, this.assets);
-      if (token !== this.token) return;
       const scene = p.scenes.find((s) => s.id === sceneId);
       if (sceneId && scene?.role !== "loading") {
+        await resolveOpeningMedia(p, this.assets);
+        if (token !== this.token) return;
         this.play(sceneId, time);
         return;
       }
@@ -314,45 +319,43 @@ export class Session {
         : openingCard(p, "loading"),
       splash = openingCard(p, "splash");
     try {
-      if (loading) {
-        this.root.innerHTML = '<div class="player-root"></div>';
-        this.player = new PlayerView(this.root.firstElementChild, this.assets, {
-          onHome: () => this.home(),
-          onExit: () => (this.editor ? this.onExit() : this.home()),
-          canExit: this.editor,
-        });
-        await this.player.start(p, loading.id);
-      } else {
-        this.root.innerHTML =
-          '<div class="opening"><div class="opening-frame" style="width:70%;height:100px"><div class="load-progress" style="width:100%;left:0;bottom:30%"><span>正在准备资源</span><progress max="100" value="0"></progress></div></div></div>';
-      }
-      if (design) return;
-      const entry = p.scenes.find((s) => s.id === p.entryId),
-        ids = [
-          ...new Set(
-            [loading, splash, entry]
-              .filter(Boolean)
-              .flatMap((s) => [
-                ...visualClips(s).map((c) => c.assetId),
-                ...(s.opening?.image ? [s.opening.image] : []),
-                ...(s.audio || []).map((c) => c.assetId),
-                ...(s.overlays || []).map((c) => c.assetId),
-              ]),
-          ),
-        ];
       const began = performance.now();
-      let ready = 0;
-      await Promise.all(
-        ids.map(async (id) => {
-          const a = p.assets[id];
-          if (!a) throw Error("开场素材缺失");
-          await inspect(await this.assets.url(a), a.kind);
-          if (token !== this.token) return;
-          ready++;
-          const progress = this.root.querySelector("progress");
-          if (progress) progress.value = Math.round((ready / ids.length) * 100);
-        }),
-      );
+      this.showLoadingCover(loading);
+      if (design) {
+        await resolveOpeningMedia(p, this.assets);
+        if (token === this.token && loading)
+          await this.showReadyScene(loading.id);
+        return;
+      }
+      const controller = (this.preloadController = new AbortController());
+      let progressState = { percent: 0 },
+        loadingReady = null;
+      const paintProgress = () => {
+        if (token !== this.token) return;
+        if (this.player) this.player.loadingProgress = progressState.percent;
+        const progress = this.root.querySelector("progress");
+        if (progress) progress.value = progressState.percent;
+      };
+      const firstClip = visualClips(
+        loading || { clips: [], source: "sequence" },
+      )[0];
+      await preloadProject(p, this.assets, {
+        signal: controller.signal,
+        onProgress: (state) => {
+          progressState = state;
+          paintProgress();
+        },
+        onReady: async (asset) => {
+          if (token !== this.token || !loading || loadingReady) return;
+          if (firstClip?.assetId === asset.id) {
+            loadingReady = this.showReadyScene(loading.id, paintProgress);
+            await loadingReady;
+          }
+        },
+      });
+      if (token !== this.token) return;
+      if (loading && !loadingReady)
+        await this.showReadyScene(loading.id, paintProgress);
       if (token !== this.token) return;
       if (this.player) this.player.loadingProgress = 100;
       const progress = this.root.querySelector("progress");
@@ -372,15 +375,19 @@ export class Session {
         return;
       }
       const target = loading?.next;
-      if (target?.kind === "scene") this.play(target.sceneId);
+      if (target?.kind === "scene") await this.showReadyScene(target.sceneId);
       else if (target?.kind === "unlinked")
         throw Error("加载节点尚未连接后续节点");
-      else this.play(splash?.id || p.entryId);
+      else await this.showReadyScene(splash?.id || p.entryId);
     } catch (error) {
       if (token !== this.token) return;
-      this.clear();
-      this.root.innerHTML = `<div class="opening"><div class="opening-error"><h2>暂时无法开始</h2><p>${esc(error.message)}</p><button>重试加载</button></div></div>`;
-      this.root.querySelector("button").onclick = () => this.open(p);
+      this.preloadController?.abort();
+      this.player?.runtime?.pause();
+      const errorPanel = document.createElement("div");
+      errorPanel.className = "opening-error loading-error";
+      errorPanel.innerHTML = `<h2>暂时无法开始</h2><p>${esc(error.message)}</p><button>重试加载</button>`;
+      this.root.append(errorPanel);
+      errorPanel.querySelector("button").onclick = () => this.open(p);
       if (this.editor) {
         const locate = document.createElement("button");
         locate.textContent = "返回编辑并定位";
@@ -392,6 +399,99 @@ export class Session {
         this.root.querySelector(".opening-error").append(exit);
       }
     }
+  }
+  showLoadingCover(loading) {
+    const c = loading?.opening || this.project.loading || {};
+    this.root.innerHTML = `<div class="opening loading-opening ${c.titleLayout === "square" ? "square" : ""}" style="--loading-color:${esc(c.color || "#e5d6b1")}"><div class="opening-frame"><div class="opening-content"><h1>${
+      c.titleLayout === "square"
+        ? Array.from(c.title || "")
+            .map((x) => `<span>${esc(x)}</span>`)
+            .join("")
+        : esc(c.title || "")
+    }</h1><p>${esc(c.subtitle || "")}</p></div><div class="load-progress"><span>${esc(c.text || "正在准备资源")}</span><progress max="100" value="0"></progress></div></div></div>`;
+    this.fitOpening();
+    this.applyOpeningLayout(c);
+    const frame = this.root.querySelector(".opening-frame");
+    const token = this.token,
+      asset = this.project.assets[c.image];
+    if (!asset) return;
+    this.assets
+      .url(asset)
+      .then((url) => {
+        if (token !== this.token || !frame.isConnected) return;
+        const image = new Image();
+        image.alt = "加载封面";
+        image.src = url;
+        frame.prepend(image);
+      })
+      .catch(() => {});
+  }
+  async showReadyScene(sceneId, onFrame = () => {}) {
+    const token = this.token,
+      previous = this.player;
+    const host = document.createElement("div");
+    host.className = "player-root";
+    Object.assign(host.style, {
+      position: "absolute",
+      inset: "0",
+      visibility: "hidden",
+    });
+    this.root.append(host);
+    const player = new PlayerView(host, this.assets, {
+      onHome: () => this.home(),
+      onExit: () => (this.editor ? this.onExit() : this.home()),
+      canExit: this.editor,
+      onChange: (event, runtime) => {
+        if (!this.editor || !["blocked", "media-error"].includes(event.type))
+          return;
+        player.message.hidden = false;
+        player.message.innerHTML = `<p>${esc(event.message)}</p><button data-locate-blocked>返回编辑并定位</button><button data-exit-blocked>退出试玩</button>`;
+        player.message.querySelector("[data-locate-blocked]").onclick = () =>
+          this.onBlocked(event.sceneId || runtime?.scene?.id, event.eventId);
+        player.message.querySelector("[data-exit-blocked]").onclick = () =>
+          this.onExit();
+      },
+    });
+    this.pendingPlayer = player;
+    await player.start(this.project, sceneId);
+    if (token !== this.token) {
+      player.dispose();
+      host.remove();
+      return;
+    }
+    if (player.loadingError) {
+      player.dispose();
+      host.remove();
+      throw player.loadingError;
+    }
+    previous?.dispose();
+    this.openingObserver?.disconnect();
+    this.root.replaceChildren(host);
+    host.style.visibility = "";
+    this.player = player;
+    this.pendingPlayer = null;
+    onFrame();
+    this.bindOpeningKey();
+  }
+  bindOpeningKey() {
+    if (this.key) document.removeEventListener("keydown", this.key, true);
+    this.key = (e) => {
+      const r = this.player?.runtime;
+      if (
+        r?.scene.role !== "splash" ||
+        this.player.menuOpen ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey ||
+        ["Tab", "Escape"].includes(e.key) ||
+        e.target.closest("input,textarea,select")
+      )
+        return;
+      e.preventDefault();
+      qteAudio.unlock();
+      r.follow(r.scene.next);
+    };
+    document.addEventListener("keydown", this.key, true);
   }
   dispose() {
     this.clear();

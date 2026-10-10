@@ -2557,20 +2557,22 @@ body[data-view="scene"] .layout > .inspector-resize {
 }
 .transform-box {
   position: absolute;
-  outline: 1px solid #8973f3;
+  outline: 1px solid #ffffffb3;
+  box-shadow: 0 0 0 1px #0005;
   cursor: move;
   pointer-events: auto;
   touch-action: none;
 }
 .transform-handle {
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 7px;
+  height: 7px;
   min-width: 0;
   padding: 0;
-  border: 2px solid #8973f3;
-  border-radius: 2px;
-  background: white;
+  border: 0;
+  border-radius: 50%;
+  background: #f4f4f4;
+  box-shadow: 0 0 1px 1px #0005;
   translate: -50% -50%;
   touch-action: none;
   z-index: 1;
@@ -2578,7 +2580,19 @@ body[data-view="scene"] .layout > .inspector-resize {
 .transform-handle::after {
   content: "";
   position: absolute;
-  inset: -5px;
+  inset: -8px;
+}
+.transform-handle.handle-n,
+.transform-handle.handle-s {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+.transform-handle.handle-e,
+.transform-handle.handle-w {
+  width: 3px;
+  height: 10px;
+  border-radius: 2px;
 }
 .handle-nw {
   left: 0;
@@ -2630,16 +2644,6 @@ body[data-view="scene"] .layout > .inspector-resize {
 }
 .guide-y {
   height: 1px;
-}
-.transform-size {
-  position: absolute;
-  padding: 3px 6px;
-  background: #302848dd;
-  border-radius: 3px;
-  color: white;
-  font-size: 11px;
-  white-space: nowrap;
-  pointer-events: none;
 }
 .clip.fixed-duration {
   border-radius: 5px;

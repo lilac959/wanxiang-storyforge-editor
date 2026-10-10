@@ -25,6 +25,7 @@ const maxSize = 1024 * 1024 * 1024;
 export class AssetStore {
   constructor() {
     this.urls = new Map();
+    this.prepared = new Map();
     this.db = new Promise((resolve, reject) => {
       const r = indexedDB.open("storyforge-local", 1);
       r.onupgradeneeded = () => r.result.createObjectStore("assets");
@@ -56,7 +57,11 @@ export class AssetStore {
     if (!asset) throw Error("素材引用缺失");
     const key = asset.source;
     if (this.urls.has(key)) return this.urls.get(key);
-    const blob = key.startsWith("asset-") ? await this.blob(key) : null;
+    const blob = this.prepared.has(key)
+      ? await this.blob(this.prepared.get(key))
+      : key.startsWith("asset-")
+        ? await this.blob(key)
+        : null;
     if (blob) {
       const url = URL.createObjectURL(blob);
       this.urls.set(key, url);
@@ -76,6 +81,26 @@ export class AssetStore {
     });
     if (!r.ok) throw Error(`无法读取素材「${asset.name}」`);
     return r.blob();
+  }
+  cacheKey(asset) {
+    const immutable = /^\/api\/media\/[a-f0-9]{64}$/.test(asset.source);
+    return `preload:${immutable ? "" : this.cacheVersion || asset.id}:${asset.source}`;
+  }
+  async cached(asset) {
+    return this.blob(
+      asset.source.startsWith("asset-") ? asset.source : this.cacheKey(asset),
+    );
+  }
+  async prepare(asset, blob) {
+    const key = asset.source.startsWith("asset-")
+      ? asset.source
+      : this.cacheKey(asset);
+    await this.put(key, blob);
+    this.prepared.set(asset.source, key);
+    // Replace any remote URL with the completed local file for playback.
+    if (this.urls.has(asset.source))
+      URL.revokeObjectURL(this.urls.get(asset.source));
+    this.urls.delete(asset.source);
   }
   async import(file) {
     if (!file.size || file.size > maxSize)

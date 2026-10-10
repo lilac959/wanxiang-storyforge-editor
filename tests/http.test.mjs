@@ -92,6 +92,10 @@ test("HTTP adapter uploads original bytes, serves ranges, isolates drafts, and p
       headers: { Range: "bytes=4-11" },
     });
     assert.equal(range.status, 206);
+    const head = await fetch(root + media, { method: "HEAD" });
+    assert.equal(Number(head.headers.get("Content-Length")), bytes.length);
+    assert.equal(head.headers.get("Accept-Ranges"), "bytes");
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
     assert.deepEqual(
       Buffer.from(await range.arrayBuffer()),
       bytes.subarray(4, 12),

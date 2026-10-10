@@ -57,11 +57,7 @@ export async function publishing(request, env) {
     });
   }
   const base = /^\/api\/media\/([a-f0-9]{64})$/.exec(path);
-  if (base && request.method === "HEAD")
-    return (await metadata(store, base[1]))
-      ? new Response(null, { status: 200 })
-      : new Response(null, { status: 404 });
-  if (base && request.method === "GET")
+  if (base && ["GET", "HEAD"].includes(request.method))
     return serveMedia(request, store, base[1]);
   const part = /^\/api\/media\/([a-f0-9]{64})\/part\/(\d+)$/.exec(path);
   if (part && request.method === "PUT") {
@@ -114,7 +110,8 @@ export async function publishing(request, env) {
     return json({ ok: true });
   }
   if (path === "/api/publish" && request.method === "POST") {
-    if (request.headers.get("X-Deploy-Protocol") !== "2") return json({error:"编辑器已更新，请刷新页面后使用部署按钮"},426);
+    if (request.headers.get("X-Deploy-Protocol") !== "2")
+      return json({ error: "编辑器已更新，请刷新页面后使用部署按钮" }, 426);
     const text = await request.text();
     if (text.length > 2 * 1024 * 1024) return json({ error: "配置过大" }, 413);
     let p;
@@ -220,6 +217,7 @@ async function serveMedia(request, store, hash) {
   });
   if (status === 206)
     headers.set("Content-Range", `bytes ${start}-${end}/${meta.size}`);
+  if (request.method === "HEAD") return new Response(null, { status, headers });
   let offset = 0,
     index = 0;
   const pieces = [];

@@ -6,11 +6,28 @@ export const sourceTime = (c, time) =>
   (c.inMs || 0) + (time - (c.startMs || 0)) * mediaRate(c);
 export const timelineTime = (c, time) =>
   c.startMs + (time - c.inMs) / mediaRate(c);
+// During playback the decoder is the clock; a second wall clock causes seeks
+// whenever decoding or a speed change falls behind the editor's playhead.
+export function previewTime(scene, time, elapsed, rate, clip, video) {
+  const current = mediaAt(scene, time);
+  if (video && current?.kind === "video" && current.id === clip?.id) {
+    if (video.seeking || video.readyState < 2 || (video.paused && !video.ended))
+      return time;
+    const end = clip.startMs + clipLength(clip);
+    return Math.max(
+      time,
+      Math.min(end, timelineTime(clip, video.currentTime * 1000)),
+    );
+  }
+  return time + Math.min(100, elapsed) * rate;
+}
 // Splitting a continuous source must not restart its decoder at each cut.
 export function continuousVideo(previous, next) {
   return !!(
-    previous && next &&
-    previous.kind === "video" && next.kind === "video" &&
+    previous &&
+    next &&
+    previous.kind === "video" &&
+    next.kind === "video" &&
     previous.assetId === next.assetId &&
     Math.abs(previous.outMs - next.inMs) <= 1 &&
     Math.abs(previous.startMs + clipLength(previous) - next.startMs) <= 1

@@ -22,6 +22,8 @@ import { esc } from "./storage.mjs";
 import { qteAudio } from "./audio.mjs";
 import { fittedStage, swipeProgress } from "./interaction-geometry.mjs";
 import { uiTransformStyle, captionBoxStyle } from "./canvas-transform.mjs";
+import { firstVideoFrame, nativeOpeningLoop } from "./media-ready.mjs";
+import { UI_IMAGES } from "./preload.mjs";
 
 export class PlayerView {
   constructor(
@@ -359,8 +361,17 @@ export class PlayerView {
   }
   async start(project, sceneId = project.entryId, time = 0) {
     this.stop();
+    const token = this.token;
     this.project = project;
     this.applyTheme(project);
+    for (const image of UI_IMAGES) {
+      if (this.assets.prepared?.has(image.source))
+        this.root.style.setProperty(
+          image.variable,
+          `url("${await this.assets.url(image)}")`,
+        );
+    }
+    if (this.disposed || token !== this.token) return;
     this.runtime = new Runtime(project, (event, runtime) =>
       this.update(event, runtime),
     );
@@ -368,6 +379,8 @@ export class PlayerView {
     // Video and opening UI must render without waiting for that permission.
     qteAudio.unlock();
     this.runtime.start(sceneId, time);
+    await this.mountPromise;
+    if (this.disposed) return;
     this.showSettingsButton(2000);
   }
   stop() {
@@ -381,6 +394,7 @@ export class PlayerView {
     this.eventId = null;
   }
   cleanupMedia() {
+    this.mediaController?.abort();
     for (const v of this.root.querySelectorAll(".picture-overlays video"))
       v.pause();
     this.video?.pause();
@@ -451,6 +465,7 @@ export class PlayerView {
     }
     await this.stillMountPromise;
     if (request !== this.stillRequest) return;
+    const previousClip = this.currentClip;
     this.currentClip = current;
     this.mountedClipId = current?.id || "gap";
     if (this.video && Number.isFinite(this.video.duration)) {
@@ -461,13 +476,15 @@ export class PlayerView {
       this.video.volume = this.currentClip.volume ?? 1;
       const wanted = sourceTime(this.currentClip, time) / 1000;
       if (
+        (previousClip?.id !== current?.id &&
+          !continuousVideo(previousClip, current)) ||
         Math.abs(this.video.currentTime - wanted) >
-        (this.timelinePlaying ? 0.2 : 0.03)
+          (this.timelinePlaying ? 0.2 : 0.03)
       )
         this.video.currentTime = Math.min(wanted, this.video.duration);
       if (this.timelinePlaying) {
-        this.video.playbackRate =
-          (this.timelineRate || 1) * mediaRate(this.currentClip);
+        const rate = (this.timelineRate || 1) * mediaRate(this.currentClip);
+        if (this.video.playbackRate !== rate) this.video.playbackRate = rate;
         this.video.preservesPitch = true;
         this.video.muted = this.muted || !!this.currentClip.audioDetached;
         if (this.video.paused) this.video.play().catch(() => {});
@@ -535,12 +552,14 @@ export class PlayerView {
       previousFrame.className = "media-transition-frame";
     }
     this.cleanupMedia();
+    this.mediaController = new AbortController();
     this.visual.innerHTML = "";
     if (previousFrame) this.visual.append(previousFrame);
     this.message.hidden = true;
     this.eventId = null;
     this.hud.innerHTML = "";
     this.loading = true;
+    this.loadingError = null;
     this.message.hidden = false;
     this.message.textContent = "正在读取素材…";
     this.stillImage = null;
@@ -606,6 +625,10 @@ export class PlayerView {
           { once: true },
         );
         v.currentTime = sourceTime(this.currentClip, time) / 1000;
+        v.loop = !!nativeOpeningLoop(scene, current, v.duration);
+        await firstVideoFrame(v, this.mediaController.signal);
+        if (token !== this.token) return;
+        releaseFrame();
         v.onerror = () => {
           if (token === this.token)
             this.showError("视频播放中断，请重新加载当前节点");
@@ -669,6 +692,7 @@ export class PlayerView {
       if (!this.editing && this.runtime?.playing) await this.syncMedia();
     } catch (error) {
       if (token === this.token) {
+        this.loadingError = error;
         this.loading = false;
         this.showError(
           `${this.project.assets[current?.assetId]?.name || scene.name}：${error.message}`,
@@ -702,8 +726,17 @@ export class PlayerView {
       return;
     }
     if (event.type === "scene") {
-      this.mount(runtime.scene, runtime.timeMs);
+      this.mountPromise = this.mount(runtime.scene, runtime.timeMs);
       this.preloadNext(runtime.scene);
+    }
+    if (
+      event.type === "loop" &&
+      this.video &&
+      mediaAt(runtime.scene, 0)?.id === this.currentClip?.id
+    ) {
+      if (!this.video.loop)
+        this.video.currentTime = sourceTime(this.currentClip, 0) / 1000;
+      this.buffering = false;
     }
     if (event.type === "seek") {
       if (
@@ -779,7 +812,8 @@ export class PlayerView {
     const r = this.runtime;
     if (!r || this.loading || r.state !== "playing") return;
     if (this.video) {
-      this.video.playbackRate = r.rate * mediaRate(this.currentClip);
+      const rate = r.rate * mediaRate(this.currentClip);
+      if (this.video.playbackRate !== rate) this.video.playbackRate = rate;
       this.video.preservesPitch = true;
       this.video.muted =
         this.muted ||

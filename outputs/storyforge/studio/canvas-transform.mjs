@@ -129,7 +129,7 @@ export class CanvasTransform {
     this.layer = document.createElement("div");
     this.layer.className = "canvas-transform";
     this.layer.hidden = true;
-    this.layer.innerHTML = `<div class="transform-box" data-canvas-transform="move" aria-label="拖动画面元素">${HANDLES.map((h) => `<button type="button" class="transform-handle handle-${h}" data-canvas-transform="${h}" aria-label="${{ nw: "左上", n: "上边", ne: "右上", e: "右边", se: "右下", s: "下边", sw: "左下", w: "左边" }[h]}调整大小"></button>`).join("")}</div><i class="transform-guide guide-x" hidden></i><i class="transform-guide guide-y" hidden></i><span class="transform-size"></span>`;
+    this.layer.innerHTML = `<div class="transform-box" data-canvas-transform="move" aria-label="拖动画面元素">${HANDLES.map((h) => `<button type="button" class="transform-handle handle-${h}" data-canvas-transform="${h}" aria-label="${{ nw: "左上", n: "上边", ne: "右上", e: "右边", se: "右下", s: "下边", sw: "左下", w: "左边" }[h]}调整大小"></button>`).join("")}</div><i class="transform-guide guide-x" hidden></i><i class="transform-guide guide-y" hidden></i>`;
     canvas.append(this.layer);
     this.box = this.layer.querySelector(".transform-box");
     this.observer = new ResizeObserver(() => this.refresh());
@@ -166,14 +166,6 @@ export class CanvasTransform {
       top: `${rect.top - canvas.top - (height - rect.height) / 2}px`,
       width: `${width}px`,
       height: `${height}px`,
-    });
-    this.layer.querySelector(".transform-size").textContent =
-      this.kind === "subtitle"
-        ? "四角调字号 · 四边调文本框"
-        : "四角等比缩放 · 四边拉伸";
-    Object.assign(this.layer.querySelector(".transform-size").style, {
-      left: `${rect.left - canvas.left}px`,
-      top: `${Math.max(0, rect.top - canvas.top - 26)}px`,
     });
   }
   pointer(e, override) {

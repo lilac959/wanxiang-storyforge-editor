@@ -8,6 +8,56 @@ import {
 import { demoProject } from "../outputs/storyforge/studio/demo.mjs";
 import { migrate } from "../outputs/storyforge/studio/model.mjs";
 import { Runtime } from "../outputs/storyforge/studio/runtime.mjs";
+import { previewTime } from "../outputs/storyforge/studio/timeline.mjs";
+
+test("slow preview follows decoded time, freezes on seeks and crosses continuous cuts", () => {
+  const clip = {
+    id: "slow",
+    kind: "video",
+    assetId: "v",
+    startMs: 1000,
+    inMs: 1000,
+    outMs: 2000,
+    playbackRate: 0.25,
+  };
+  const next = {
+    ...clip,
+    id: "next",
+    startMs: 5000,
+    inMs: 2000,
+    outMs: 3000,
+    playbackRate: 1,
+  };
+  const scene = { source: "sequence", clips: [clip, next] };
+  const video = {
+    currentTime: 1.125,
+    readyState: 4,
+    paused: false,
+    seeking: false,
+  };
+  assert.equal(previewTime(scene, 1400, 100, 1, clip, video), 1500);
+  assert.equal(previewTime(scene, 1500, 100, 1, clip, video), 1500);
+  assert.equal(
+    previewTime(scene, 1400, 100, 1, clip, { ...video, seeking: true }),
+    1400,
+  );
+  assert.equal(
+    previewTime(scene, 1400, 100, 1, clip, { ...video, paused: true }),
+    1400,
+  );
+  assert.equal(
+    previewTime(scene, 4900, 100, 1, clip, { ...video, currentTime: 2.05 }),
+    5000,
+  );
+  assert.equal(
+    previewTime(scene, 5000, 16, 1, next, { ...video, currentTime: 2.05 }),
+    5050,
+  );
+  assert.equal(
+    previewTime({ source: "sequence", clips: [] }, 2000, 300, 0.5, null, null),
+    2050,
+  );
+});
 
 test("ruler density adapts to zoom and zoom preserves the chosen time under the pointer", () => {
   const small = rulerTicks(10000, 400),

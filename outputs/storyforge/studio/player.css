@@ -157,7 +157,10 @@ button:disabled {
   flex-wrap: wrap;
 }
 .choices button {
-  --choice-icon: url("assets/ui/option-triangle.png");
+  --choice-icon: var(
+    --choice-triangle,
+    url("../assets/ui/option-triangle.png")
+  );
   position: relative;
   pointer-events: auto;
   width: min(26cqw, 280px);
@@ -265,8 +268,9 @@ button:disabled {
   width: 9cqw;
   height: 9cqw;
   position: relative;
-  background: transparent url("../assets/ui/qte-original-frame.png")
-    center/contain no-repeat;
+  background: transparent
+    var(--qte-frame, url("../assets/ui/qte-original-frame.png")) center/contain
+    no-repeat;
   border: 0;
 }
 .qte svg {
@@ -428,6 +432,18 @@ button:disabled {
   container-type: inline-size;
   display: grid;
   place-items: center;
+}
+.loading-error {
+  position: absolute;
+  inset: 0;
+  z-index: 11000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #080c0dd9;
+  padding: 24px;
+  text-align: center;
 }
 .opening h1 {
   font-size: 5.53cqw;
@@ -756,8 +772,8 @@ button:disabled {
   width: 100%;
   aspect-ratio: 82/81;
   position: relative;
-  background: url("../assets/ui/qte-original-frame.png") center/100% 100%
-    no-repeat;
+  background: var(--qte-frame, url("../assets/ui/qte-original-frame.png"))
+    center/100% 100% no-repeat;
 }
 .psd-qte-tile svg {
   width: 100%;
@@ -847,7 +863,10 @@ button:disabled {
   display: none;
 }
 .play-stage .choices button {
-  --choice-icon: url("../assets/ui/option-triangle.png");
+  --choice-icon: var(
+    --choice-triangle,
+    url("../assets/ui/option-triangle.png")
+  );
   position: relative;
   pointer-events: auto;
   width: 100%;
@@ -896,7 +915,7 @@ button:disabled {
   filter: none;
 }
 .play-stage .choices button:nth-child(even) {
-  --choice-icon: url("../assets/ui/option-circle.png");
+  --choice-icon: var(--choice-circle, url("../assets/ui/option-circle.png"));
   animation-delay: 0.06s;
 }
 .play-stage .choices button:before {

@@ -48,6 +48,7 @@ import {
   clipLength,
   mediaRate,
   mediaAt,
+  previewTime,
   ensureSequence,
   appendVisual,
   insertVisual,
@@ -3014,6 +3015,7 @@ function beginTimelineBox(e) {
       }
       renderTimeline();
       renderInspector();
+      markPreviewSelection();
     },
     { once: true, signal: controller.signal },
   );
@@ -3442,6 +3444,12 @@ function timelineKey(e) {
   });
 }
 function canvasPointer(e) {
+  if (
+    e.button !== 0 ||
+    canvasTransform?.active ||
+    e.target.closest("[data-canvas-transform]")
+  )
+    return;
   const openingEl = e.target.closest("[data-opening-element]");
   if (openingEl && openingRole(s()) && e.button === 0) {
     e.preventDefault();
@@ -3500,7 +3508,11 @@ function canvasPointer(e) {
     return;
   }
   const el = e.target.closest("[data-edit-event],[data-edit-item]");
-  if (!el || e.button !== 0) return;
+  if (!el) {
+    if (!e.target.closest("button,input,select,[data-action]"))
+      clearCanvasSelection();
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
   selection = {
@@ -3516,6 +3528,14 @@ function canvasPointer(e) {
   markPreviewSelection();
   if (canvasTransform.target === el) canvasTransform.pointer(e, "move");
   else if (selection.kind === "overlay") moveCanvasOverlay(e, el);
+}
+function clearCanvasSelection() {
+  if (canvasTransform?.active) return;
+  timelineSelection.clear();
+  selection = { kind: "scene" };
+  markPreviewSelection();
+  renderTimeline();
+  renderInspector();
 }
 function moveCanvasOverlay(e, el) {
   try {
@@ -5251,7 +5271,14 @@ function toggleTimelinePlayback() {
     if (!still.loading && !still.buffering)
       time = Math.min(
         editableDuration(),
-        time + Math.min(100, now - previous) * previewRate(s(), time),
+        previewTime(
+          s(),
+          time,
+          now - previous,
+          previewRate(s(), time),
+          still.currentClip,
+          still.video,
+        ),
       );
     previous = now;
     paintStill();
@@ -5405,12 +5432,14 @@ function previewKeys(e) {
     queueStill();
     followPlayhead();
   } else if (e.key === "Escape") {
+    if (canvasTransform?.active) return;
     cancelTimelineGesture?.();
     timelineSelection.clear();
     selection = { kind: "scene" };
     $(".timeline-context")?.remove();
     renderTimeline();
     renderInspector();
+    markPreviewSelection();
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
     e.preventDefault();
     timelineSelection.clear();
