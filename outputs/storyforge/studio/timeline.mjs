@@ -6,6 +6,16 @@ export const sourceTime = (c, time) =>
   (c.inMs || 0) + (time - (c.startMs || 0)) * mediaRate(c);
 export const timelineTime = (c, time) =>
   c.startMs + (time - c.inMs) / mediaRate(c);
+// Splitting a continuous source must not restart its decoder at each cut.
+export function continuousVideo(previous, next) {
+  return !!(
+    previous && next &&
+    previous.kind === "video" && next.kind === "video" &&
+    previous.assetId === next.assetId &&
+    Math.abs(previous.outMs - next.inMs) <= 1 &&
+    Math.abs(previous.startMs + clipLength(previous) - next.startMs) <= 1
+  );
+}
 export function visualClips(s) {
   if (s.source === "sequence") return s.clips || [];
   if (s.source === "video")

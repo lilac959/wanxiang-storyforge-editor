@@ -8,6 +8,7 @@ import {
   mediaRate,
   sourceTime,
   timelineTime,
+  continuousVideo,
 } from "./timeline.mjs";
 import { Runtime } from "./runtime.mjs";
 import {
@@ -498,8 +499,25 @@ export class PlayerView {
     }
   }
   async mount(scene, time = 0) {
-    const token = ++this.token;
     const current = mediaAt(scene, time);
+    if (
+      !this.loading && this.video &&
+      this.mountedSceneId === scene.id &&
+      continuousVideo(this.currentClip, current)
+    ) {
+      this.currentClip = current;
+      this.mountedClipId = current.id;
+      this.video.volume = current.volume ?? 1;
+      this.video.muted = this.muted || !!current.audioDetached || scene.role === "loading";
+      this.video.playbackRate = (this.runtime?.rate ?? 1) * mediaRate(current);
+      const wanted = sourceTime(current, time) / 1000;
+      // Normal forward playback retains its decoded frames; explicit jumps seek.
+      if (Math.abs(this.video.currentTime - wanted) > 0.2)
+        this.video.currentTime = wanted;
+      return;
+    }
+    const token = ++this.token;
+    this.mountedSceneId = scene.id;
     this.currentClip = current;
     this.mountedClipId = current?.id || "gap";
     // Retain the last decoded frame until the replacement media is ready.
@@ -1106,7 +1124,7 @@ export class PlayerView {
       if (!opts.length && !this.editing)
         this.showError("当前条件下没有可用选项，请联系作品作者");
     } else if (event.kind === "hotspot")
-      host.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
+      host.innerHTML = `<button ${edit} class="hotspot" data-hotspot style="left:${event.x}%;top:${event.y}%;--scale:${(event.scale ?? 100) / 100}" aria-label="${esc(event.hint || "点击热点")}">＋</button>`;
     else {
       const glyph = GESTURE_PATHS[event.gesture] || GESTURE_PATHS.click;
       host.innerHTML = `<div ${edit} class="qte mechanical-qte psd-qte" style="left:${event.x}%;top:${event.y}%;--scale:${event.scale / 100}" aria-label="${esc(gestures[event.gesture])}"><div class="psd-qte-surface">${event.hint ? `<span class="qte-hint">${esc(event.hint)}</span>` : ""}<div class="psd-qte-tile"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="ring" cx="50" cy="50" r="34"/><circle class="meter" cx="50" cy="50" r="34" pathLength="100"/><path class="psd-glyph" d="${glyph}"/></svg>${event.gesture === "multi" ? `<div class="qte-segments">${Array.from({ length: event.clicks }, () => "<i></i>").join("")}</div>` : ""}</div></div><small class="qte-count sr-only"></small></div>`;

@@ -921,7 +921,7 @@ function renderInspectorContent() {
         `<div class="two">${field("横向位置 %", "x", obj.x, { type: "number", min: 0, max: 100, step: 0.1 })}${field("纵向位置 %", "y", obj.y, { type: "number", min: 0, max: 100, step: 0.1 })}</div>` +
         field("提示大小 %", "scale", obj.scale, {
           type: "number",
-          min: 40,
+          min: 5,
           max: 180,
           step: 5,
         }) +

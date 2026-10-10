@@ -1119,6 +1119,7 @@ button:disabled {
   color: #e5d6b1;
 }
 .play-stage .hotspot {
+  scale: var(--scale, 1);
   width: 5cqw;
   height: 5cqw;
   font-size: 2.5cqw;

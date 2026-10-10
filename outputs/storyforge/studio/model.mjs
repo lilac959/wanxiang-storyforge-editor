@@ -1070,7 +1070,7 @@ export function validate(p, { publish = false } = {}) {
       if (
         !finite(e.x, 0, 100) ||
         !finite(e.y, 0, 100) ||
-        !finite(e.scale, 40, 180) ||
+        !finite(e.scale, 5, 180) ||
         !finite(e.volume, 0, 1) ||
         !Object.hasOwn(gestures, e.gesture) ||
         !integer(e.holdMs) ||
