@@ -2387,9 +2387,27 @@ body[data-view="scene"] .canvas[data-device="landscape"] {
   max-width: none;
 }
 body[data-view="scene"] .transport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   flex-shrink: 0;
-  height: 34px;
+  min-height: 40px;
   margin: 0;
+}
+.transport-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.transport-display {
+  justify-self: end;
+}
+.transport-display > summary {
+  height: 28px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.transport-display > div {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 body[data-view="scene"] .transport #seek {
   display: none;
@@ -2397,12 +2415,10 @@ body[data-view="scene"] .transport #seek {
 body[data-view="scene"] .transport .duration-label::before {
   content: " / ";
 }
-body[data-view="scene"] .transport button {
-  margin-left: auto;
-  order: 2;
-}
-body[data-view="scene"] .transport .duration-label {
-  margin-right: auto;
+body[data-view="scene"] .transport > button {
+  justify-self: center;
+  min-width: 72px;
+  min-height: 34px;
 }
 body[data-view="scene"] .timeline-dock {
   display: flex;
